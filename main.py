@@ -21,12 +21,11 @@ class DSTWR_The_Absolute_Monster_Engine:
         self.isports_key = os.getenv("ISPORTS_KEY")
         self.football_data_key = os.getenv("FOOTBALL_DATA_KEY")
 
-        # 🌟 تعديل ذكي: صناعة قفزات تاريخية لأعوام المونديال القديمة + تغطية حية كاملة منذ 1950 إلى 2026
-        # هذا يمنحك أرشيفاً يمتد لأكثر من 70 سنة مضت دون تدمير وقت الـ GitHub Actions
+        # 🌟 الأرشيف التاريخي العام في الجداول الأساسية للمواسم
         self.all_historical_years = [1000, 1930, 1934, 1938] + list(range(1950, 2027))
         
-        # نطاق السحب الإحصائي المعقد (التشكيلات والاستحواذ) المدعوم عالمياً
-        self.api_supported_seasons = list(range(2015, 2027))
+        # 🎯 النطاق المطلوب: تغطية شاملة وعميقة للملاعب والمدربين من 2010 إلى 2026+
+        self.api_supported_seasons = list(range(2010, 2027))
         
         self.leagues = [
             {"code": "PL", "fd_id": 2021, "af_id": 39, "sm_id": 8, "name": "Premier League", "country": "England"},
@@ -51,7 +50,7 @@ class DSTWR_The_Absolute_Monster_Engine:
         try:
             response = requests.request(method, url, **kwargs)
             if response.status_code == 429:
-                logging.warning("⏳ [حد الطلبات] انتظار 30 ثانية لحماية المفاتيح...")
+                logging.warning("⏳ [حد الطلبات] السيرفر مضغوط، انتظار 30 ثانية لتجنب الحظر...")
                 time.sleep(30)
                 return requests.request(method, url, **kwargs)
             return response
@@ -60,17 +59,15 @@ class DSTWR_The_Absolute_Monster_Engine:
             return None
 
     def pipeline_0_generate_seasons(self):
-        """تأسيس حقل السنوات والأرشيف التاريخي في ثوانٍ معدودة"""
         logging.info("🧱 جاري تأسيس المواسم التاريخية المستهدفة في قاعدة البيانات...")
         for lg in self.leagues:
             for year in self.all_historical_years:
                 res = self.safe_request("POST", f"{self.base_url}/seasons", headers=self.headers, json={
                     "id": int(f"{lg['af_id']}{year}"), "league_id": lg["af_id"], "year": year
                 })
-                # سيعطيك تلميح فوري في الـ Logs أن السيرفر يستجيب
                 if year in [1000, 1950, 2026]:
                     self.check_response(f"تأسيس موسم {year} لـ {lg['name']}", res)
-            time.sleep(0.1)
+            time.sleep(0.2)
 
     def pipeline_1_leagues_teams_and_stats(self):
         logging.info("⚡ [PIPELINE 1] ضخ الدوريات، الفرق، الهدافين، وصناع اللعب...")
@@ -92,39 +89,38 @@ class DSTWR_The_Absolute_Monster_Engine:
                         self.safe_request("POST", f"{self.base_url}/league_standings", headers=self.headers, json={
                             "league_id": lg["af_id"], "team_id": t.get('id'), "played": item.get('playedGames'), "points": item.get('points'), "won": item.get('won'), "lost": item.get('lost')
                         })
+            time.sleep(1.0) # تهدئة لحماية مفتاح الترتيب
 
-            url_ts = "https://api-football-v1.p.rapidapi.com/v3/players/topscorers"
-            res_ts = self.safe_request("GET", url_ts, headers=api_headers, params={"league": lg["af_id"], "season": 2025})
-            if res_ts and res_ts.status_code == 200:
-                for p_data in res_ts.json().get('response', []):
-                    p = p_data.get('player', {})
-                    g = p_data.get('statistics', [{}])[0].get('goals', {})
-                    res_ts_add = self.safe_request("POST", f"{self.base_url}/top_scorers", headers=self.headers, json={
-                        "league_id": lg["af_id"], "player_id": p.get('id'), "player_name": p.get('name'), "team_name": p_data.get('statistics', [{}])[0].get('team', {}).get('name'), "goals": g.get('total')
-                    })
-                    self.check_response(f"هداف: {p.get('name')}", res_ts_add)
-
-            url_ta = "https://api-football-v1.p.rapidapi.com/v3/players/topassists"
-            res_ta = self.safe_request("GET", url_ta, headers=api_headers, params={"league": lg["af_id"], "season": 2025})
-            if res_ta and res_ta.status_code == 200:
-                for p_data in res_ta.json().get('response', []):
-                    p = p_data.get('player', {})
-                    a = p_data.get('statistics', [{}])[0].get('goals', {})
-                    self.safe_request("POST", f"{self.base_url}/top_assists", headers=self.headers, json={
-                        "league_id": lg["af_id"], "player_id": p.get('id'), "player_name": p.get('name'), "team_name": p_data.get('statistics', [{}])[0].get('team', {}).get('name'), "assists": a.get('assists')
-                    })
-            time.sleep(0.5)
+            # الهدافين وصناع اللعب
+            for stat_type in ["topscorers", "topassists"]:
+                url_stat = f"https://api-football-v1.p.rapidapi.com/v3/players/{stat_type}"
+                res_s = self.safe_request("GET", url_stat, headers=api_headers, params={"league": lg["af_id"], "season": 2025})
+                if res_s and res_s.status_code == 200:
+                    for p_data in res_s.json().get('response', []):
+                        p = p_data.get('player', {})
+                        stat_obj = p_data.get('statistics', [{}])[0].get('goals', {})
+                        table_target = "top_scorers" if stat_type == "topscorers" else "top_assists"
+                        field_target = "goals" if stat_type == "topscorers" else "assists"
+                        val_target = stat_obj.get('total') if stat_type == "topscorers" else stat_obj.get('assists')
+                        
+                        self.safe_request("POST", f"{self.base_url}/{table_target}", headers=self.headers, json={
+                            "league_id": lg["af_id"], "player_id": p.get('id'), "player_name": p.get('name'), "team_name": p_data.get('statistics', [{}])[0].get('team', {}).get('name'), field_target: val_target
+                        })
+                time.sleep(1.0) # تأخير ذكي لحماية المفتاح
 
     def pipeline_2_deep_archive(self):
-        logging.info("⚡ [PIPELINE 2] جلب الملاعب، المدربين، قيم اللاعبين وعقودهم التاريخية...")
+        logging.info("⚡ [PIPELINE 2] جلب الملاعب والمدربين التاريخيين (2010 - 2026)...")
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         
         for lg in self.leagues:
+            logging.info(f"🏟️ جاري فحص ملاعب ومدربي دوري: {lg['name']}")
             for season in self.api_supported_seasons:
                 url = "https://api-football-v1.p.rapidapi.com/v3/teams"
                 res = self.safe_request("GET", url, headers=api_headers, params={"league": lg["af_id"], "season": season})
+                
                 if res and res.status_code == 200:
-                    for chunk in res.json().get('response', []):
+                    teams_data = res.json().get('response', [])
+                    for chunk in teams_data:
                         v = chunk.get('venue', {})
                         if v.get('id'):
                             self.safe_request("POST", f"{self.base_url}/stadiums", headers=self.headers, json={"id": v.get('id'), "name": v.get('name'), "city": v.get('city'), "capacity": v.get('capacity'), "image_url": v.get('image'), "surface": v.get('surface')})
@@ -135,8 +131,11 @@ class DSTWR_The_Absolute_Monster_Engine:
                         if res_c and res_c.status_code == 200:
                             for coach in res_c.json().get('response', []):
                                 self.safe_request("POST", f"{self.base_url}/coaches", headers=self.headers, json={"id": coach.get('id'), "team_id": t_id, "name": coach.get('name'), "nationality": coach.get('nationality'), "photo_url": coach.get('photo')})
-                time.sleep(0.1)
+                
+                # 🛑 السر السحري هنا: ننام ثانيتين كاملتين بعد كل موسم لكي يهدأ سيرفر الـ API ولا يحظرنا أبداً
+                time.sleep(2.0)
 
+        # لاعبين وعقود SportMonks
         url_sm_p = "https://api.sportmonks.com/v3/football/players"
         res_sm_p = self.safe_request("GET", url_sm_p, params={"api_token": self.sportmonks_key, "include": "contracts;teams"})
         if res_sm_p and res_sm_p.status_code == 200:
@@ -163,6 +162,7 @@ class DSTWR_The_Absolute_Monster_Engine:
             if res_ij and res_ij.status_code == 200:
                 for ij in res_ij.json().get('response', []):
                     self.safe_request("POST", f"{self.base_url}/player_injuries", headers=self.headers, json={"player_id": ij.get('player', {}).get('id'), "team_id": ij.get('team', {}).get('id'), "league_id": lg["af_id"], "player_name": ij.get('player', {}).get('name'), "type": ij.get('problems', 'Injury')})
+            time.sleep(1.0)
 
         res_n = self.safe_request("GET", "http://api.isportsapi.com/sport/football/news", params={"api_key": self.isports_key})
         if res_n and res_n.status_code == 200:
@@ -170,7 +170,7 @@ class DSTWR_The_Absolute_Monster_Engine:
                 self.safe_request("POST", f"{self.base_url}/media_news", headers=self.headers, json={"id": news.get('newsId'), "title": news.get('title'), "content": news.get('content'), "source": news.get('source'), "image_url": news.get('imageUrl'), "published_at": news.get('pubTime')})
 
     def pipeline_4_matches_stats_and_lineups(self):
-        logging.info("⚡ [PIPELINE 4] ضخ مباريات اليوم الحية + التشكيلات التكتيكية + إحصائيات الاستحواذ...")
+        logging.info("⚡ [PIPELINE 4] ضخ مباريات اليوم الحية + التشكيلات التكتيكية...")
         today = datetime.now().strftime('%Y-%m-%d')
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         
@@ -213,16 +213,16 @@ class DSTWR_The_Absolute_Monster_Engine:
                                 "fouls": s_maps.get('Fouls', 0),
                                 "corners": s_maps.get('Corner Kicks', 0)
                             })
-                time.sleep(0.5)
+                time.sleep(1.5)
 
     def run_engine(self):
-        logging.info("🚀 [LAUNCH] إطلاق المحرك النفاث السريع لاكتساح كافة جداول Supabase الـ 50!")
+        logging.info("🚀 [LAUNCH] إطلاق المحرك النفاث الذكي لملء جداول السوبربيز!")
         self.pipeline_0_generate_seasons()
         self.pipeline_1_leagues_teams_and_stats()
         self.pipeline_2_deep_archive()
         self.pipeline_3_market_injuries_and_news()
         self.pipeline_4_matches_stats_and_lineups()
-        logging.info("🏆 [FINISH] تم ملء الخزانات بالكامل وجداولك الآن تنبض بأقوى محتوى رياضي في السوق!")
+        logging.info("🏆 [FINISH] تم ملء الخزانات بالكامل من 2010 حتى 2026+ بنجاح ساحق!")
 
 if __name__ == "__main__":
     DSTWR_The_Absolute_Monster_Engine().run_engine()
