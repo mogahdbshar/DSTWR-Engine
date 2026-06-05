@@ -24,9 +24,6 @@ class DSTWR_The_Absolute_Monster_Engine:
         # 🌟 الأرشيف التاريخي العام في الجداول الأساسية للمواسم
         self.all_historical_years = [1000, 1930, 1934, 1938] + list(range(1950, 2027))
         
-        # 🎯 النطاق المطلوب: تغطية شاملة وعميقة للملاعب والمدربين من 2010 إلى 2026+
-        self.api_supported_seasons = list(range(2010, 2027))
-        
         self.leagues = [
             {"code": "PL", "fd_id": 2021, "af_id": 39, "sm_id": 8, "name": "Premier League", "country": "England"},
             {"code": "PD", "fd_id": 2014, "af_id": 140, "sm_id": 565, "name": "La Liga", "country": "Spain"},
@@ -49,11 +46,10 @@ class DSTWR_The_Absolute_Monster_Engine:
             logging.error(f"❌ [خطأ في الرفع] {context} | الكود: {response.status_code} | الرد: {response.text}")
             return False
 
-    # 🔍 ميزة التخطي الذكي: تفحص سوبربيز أولاً للتأكد إن كان السطر موجوداً لتوفير الوقت والطلبات
+    # 🔍 ميزة التخطي الذكي لقراءة ما في المخزن وتوفير باقة الـ API ووقت جيت هاب
     def check_if_exists(self, table, item_id, id_column="id"):
         try:
             url = f"{self.base_url}/{table}?{id_column}=eq.{item_id}"
-            # نرسل طلب HEAD أو GET خفيف لمعرفة إن كان موجوداً
             res = requests.get(url, headers=self.headers)
             if res.status_code == 200 and len(res.json()) > 0:
                 return True
@@ -61,9 +57,9 @@ class DSTWR_The_Absolute_Monster_Engine:
         except Exception:
             return False
 
-    # ⏳ دالة الطلبات الآمنة والمقاومة للحظر بالتوقيت التصاعدي الذكي
+    # ⏳ دالة الطلبات الآمنة والمقاومة للحظر بالتوقيت التصاعدي المضاعف
     def safe_request(self, method, url, **kwargs):
-        delay = 30  # نبدأ بـ 30 ثانية لتخفيف الضغط
+        delay = 30  
         retries = 4
         for i in range(retries):
             try:
@@ -71,7 +67,7 @@ class DSTWR_The_Absolute_Monster_Engine:
                 if response.status_code == 429:
                     logging.warning(f"⏳ [حد الطلبات 429] السيرفر مضغوط. محاولة {i+1}/{retries}. انتظار {delay} ثانية للتطهير...")
                     time.sleep(delay)
-                    delay *= 2  # مضاعفة وقت الانتظار (30 -> 60 -> 120)
+                    delay *= 2  
                     continue
                 return response
             except Exception as e:
@@ -85,7 +81,6 @@ class DSTWR_The_Absolute_Monster_Engine:
             for year in self.all_historical_years:
                 season_id = int(f"{lg['af_id']}{year}")
                 
-                # تخطي إذا كان الموسم موجوداً
                 if self.check_if_exists("seasons", season_id):
                     if year in [1000, 1950, 2026]:
                         logging.info(f"⏭️ [تخطي ذكي] موسم {year} لـ {lg['name']} موجود مسبقاً.")
@@ -103,7 +98,6 @@ class DSTWR_The_Absolute_Monster_Engine:
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         
         for lg in self.leagues:
-            # فحص وتخطي الدوري
             if not self.check_if_exists("leagues", lg["af_id"]):
                 res_l = self.safe_request("POST", f"{self.base_url}/leagues", headers=self.headers, json={"id": lg["af_id"], "name": lg["name"], "country": lg["country"], "code": lg["code"]})
                 self.check_response(f"الدوري: {lg['name']}", res_l)
@@ -118,14 +112,12 @@ class DSTWR_The_Absolute_Monster_Engine:
                         t = item.get('team', {})
                         team_id = t.get('id')
                         
-                        # فحص وتخطي الفريق لعدم إضاعة الوقت
                         if not self.check_if_exists("teams", team_id):
                             res_t = self.safe_request("POST", f"{self.base_url}/teams", headers=self.headers, json={"id": team_id, "league_id": lg["af_id"], "name": t.get('name'), "short_name": t.get('shortName'), "logo_url": t.get('crest')})
                             self.check_response(f"فريق: {t.get('name')}", res_t)
                         else:
                             logging.info(f"⏭️ [تخطي ذكي] فريق: {t.get('name')} موجود في المخزن.")
                         
-                        # الترتيب نقوم بعمل تحديث دوري له لأن أرقامه متغيرة دائماً
                         res_std = self.safe_request("POST", f"{self.base_url}/league_standings", headers=self.headers, json={
                             "league_id": lg["af_id"], "team_id": team_id, "played": item.get('playedGames'), "points": item.get('points'), "won": item.get('won'), "lost": item.get('lost')
                         })
@@ -150,55 +142,49 @@ class DSTWR_The_Absolute_Monster_Engine:
                 time.sleep(1)
 
     def pipeline_2_deep_archive(self):
-        logging.info("⚡ [PIPELINE 2] جلب الملاعب والمدربين التاريخيين الذكي السرعة القصوى (2010 - 2026)...")
+        logging.info("⚡ [PIPELINE 2 المطور] جلب الملاعب والمدربين بطريقة ذكية لحل مشكلة الحظر والـ 0 صفوف...")
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         
         for lg in self.leagues:
-            logging.info(f"🏟️ جاري فحص ملاعب دوري: {lg['name']}")
-            tracked_teams = set()
+            logging.info(f"🏟️ جاري فحص ملاعب وطواقم دوري: {lg['name']} للموسم الحالي لكسر الحظر...")
             
-            for season in self.api_supported_seasons:
-                url = "https://api-football-v1.p.rapidapi.com/v3/teams"
-                res = self.safe_request("GET", url, headers=api_headers, params={"league": lg["af_id"], "season": season})
-                
-                if res and res.status_code == 200:
-                    teams_data = res.json().get('response', [])
-                    for chunk in teams_data:
-                        v = chunk.get('venue', {})
-                        v_id = v.get('id')
-                        
-                        if v_id:
-                            # 🏟️ فحص وتخطي الملعب فوراً لو تم رفعه سابقاً لحل مشكلة الـ 0 صفوف واختصار وقت الـ API
-                            if not self.check_if_exists("stadiums", v_id):
-                                res_v = self.safe_request("POST", f"{self.base_url}/stadiums", headers=self.headers, json={"id": v_id, "name": v.get('name'), "city": v.get('city'), "capacity": v.get('capacity'), "image_url": v.get('image'), "surface": v.get('surface')})
-                                self.check_response(f"الملعب الجديد: {v.get('name')}", res_v)
-                            else:
-                                logging.info(f"⏭️ [تخطي 🏟️] الملعب {v.get('name')} موجود مسبقاً.")
-                        
-                        t_id = chunk.get('team', {}).get('id')
-                        if t_id:
-                            tracked_teams.add(t_id)
-                
-                # تأخير أمان بين الفصول لمنع الـ Rate Limit لـ RapidAPI
-                time.sleep(2)
+            url = "https://api-football-v1.p.rapidapi.com/v3/teams"
+            res = self.safe_request("GET", url, headers=api_headers, params={"league": lg["af_id"], "season": 2025})
+            
+            if res and res.status_code == 200:
+                teams_data = res.json().get('response', [])
+                for chunk in teams_data:
+                    # 🏟️ استخراج وحقن الملاعب فوراً
+                    v = chunk.get('venue', {})
+                    v_id = v.get('id')
+                    if v_id:
+                        if not self.check_if_exists("stadiums", v_id):
+                            res_v = self.safe_request("POST", f"{self.base_url}/stadiums", headers=self.headers, json={
+                                "id": v_id, "name": v.get('name'), "city": v.get('city'), 
+                                "capacity": v.get('capacity'), "image_url": v.get('image'), "surface": v.get('surface')
+                            })
+                            self.check_response(f"الملعب المكتشف: {v.get('name')}", res_v)
+                        else:
+                            logging.info(f"⏭️ [تخطي 🏟️] الملعب {v.get('name')} موجود مسبقاً.")
+                    
+                    # 👔 استخراج وحقن المدربين مباشرة وبذكاء عالي
+                    t_id = chunk.get('team', {}).get('id')
+                    coach = chunk.get('coach', {})
+                    coach_id = coach.get('id')
+                    if coach_id:
+                        if not self.check_if_exists("coaches", coach_id):
+                            res_coach = self.safe_request("POST", f"{self.base_url}/coaches", headers=self.headers, json={
+                                "id": coach_id, "team_id": t_id, "name": coach.get('name'), 
+                                "nationality": coach.get('nationality'), "photo_url": coach.get('photo')
+                            })
+                            self.check_response(f"المدرب المكتشف: {coach.get('name')}", res_coach)
+                        else:
+                            logging.info(f"⏭️ [تخطي 👔] المدرب {coach.get('name')} موجود مسبقاً.")
+            
+            # تهدئة إجبارية قاطعة مدتها 10 ثوانٍ بين البطولات لحماية حسابك من الـ Rate Limit
+            time.sleep(10)
 
-            logging.info(f"👔 جاري جلب مدربي فرق دوري {lg['name']} بدون تكرار...")
-            for team_id in tracked_teams:
-                url_c = "https://api-football-v1.p.rapidapi.com/v3/coachs"
-                res_c = self.safe_request("GET", url_c, headers=api_headers, params={"team": team_id})
-                if res_c and res_c.status_code == 200:
-                    for coach in res_c.json().get('response', []):
-                        coach_id = coach.get('id')
-                        if coach_id:
-                            # 👔 فحص وتخطي المدرب لو مسجل مسبقاً
-                            if not self.check_if_exists("coaches", coach_id):
-                                res_coach = self.safe_request("POST", f"{self.base_url}/coaches", headers=self.headers, json={"id": coach_id, "team_id": team_id, "name": coach.get('name'), "nationality": coach.get('nationality'), "photo_url": coach.get('photo')})
-                                self.check_response(f"المدرب الجديد: {coach.get('name')}", res_coach)
-                            else:
-                                logging.info(f"⏭️ [تخطي 👔] المدرب {coach.get('name')} موجود مسبقاً.")
-                time.sleep(2)
-
-        # المزامنة المتقدمة للاعبين من Sportmonks
+        logging.info("🏃 جاري ضخ بيانات اللاعبين المتقدمة من Sportmonks...")
         url_sm_p = "https://api.sportmonks.com/v3/football/players"
         res_sm_p = self.safe_request("GET", url_sm_p, params={"api_token": self.sportmonks_key, "include": "contracts;teams"})
         if res_sm_p and res_sm_p.status_code == 200:
@@ -293,14 +279,14 @@ class DSTWR_The_Absolute_Monster_Engine:
                 time.sleep(1)
 
     def run_engine(self):
-        logging.info("🚀 [LAUNCH] إطلاق المحرك النفاث الذكي لملء جداول السوبربيز بأقصى سرعة وضمان التخطي!")
+        logging.info("🚀 [LAUNCH] إطلاق المحرك النفاث المستقر لملء جداول السوبربيز وضمان التخطي!")
         self.pipeline_0_generate_seasons()
         self.pipeline_1_leagues_teams_and_stats()
         self.pipeline_2_deep_archive()
         self.pipeline_3_market_injuries_and_news()
         self.pipeline_4_matches_stats_and_lineups()
-        logging.info("🏆 [FINISH] تم ملء الخزانات بالكامل من 2010 حتى 2026+ بنجاح ساحق ومستقر!")
+        logging.info("🏆 [FINISH] تم ملء الخزانات بالكامل بأعلى معايير الاستقرار والأمان!")
 
 if __name__ == "__main__":
     DSTWR_The_Absolute_Monster_Engine().run_engine()
-            
+    
