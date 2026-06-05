@@ -5,7 +5,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '0 */12 * * *' # تشغيل تلقائي هادئ كل 12 ساعة بدون إزعاج
 
 jobs:
   sync:
@@ -22,21 +22,11 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run Engine
+      - name: Run Ultra Engine
         run: python main.py
         env:
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           ISPORTS_KEY: ${{ secrets.ISPORTS_KEY }}
           SPORTMONKS_KEY: ${{ secrets.SPORTMONKS_KEY }}
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
-
-      - name: Push to Data Repo
-        run: |
-          git config --global user.name 'DSTWR-Bot'
-          git config --global user.email 'bot@dstwr.com'
-          git clone https://${{ secrets.GH_TOKEN }}@github.com/mogahdbshar/DSTWR-Data.git
-          cp live_data.json DSTWR-Data/
-          cd DSTWR-Data
-          git add live_data.json
-          git commit -m "Update live data [Automated]" || echo "No changes to commit"
-          git push
