@@ -27,8 +27,9 @@ class DSTWR_Ultimate_Engine:
         self.api_football_key = os.getenv("API_FOOTBALL_KEY")
         self.isports_key = os.getenv("ISPORTS_KEY")
         
-        # الذاكرة المؤقتة للتخطي الذكي
+        # الذاكرة المؤقتة للتخطي الذكي + إحصائيات التقرير
         self.cache = {} 
+        self.stats = {"added": 0, "skipped": 0}
         
         self.leagues = [
             {"af_id": 39, "name": "Premier League"}, {"af_id": 140, "name": "La Liga"},
@@ -47,8 +48,10 @@ class DSTWR_Ultimate_Engine:
             if res.status_code in [200, 201]:
                 logging.info(f"✅ [{table.upper()}] تم رفع: {label}")
                 self.cache[table].add(item_id)
+                self.stats["added"] += 1
             elif res.status_code == 409:
                 self.cache[table].add(item_id)
+                self.stats["skipped"] += 1
         except Exception as e:
             logging.error(f"⚠️ خطأ في {table}: {e}")
 
@@ -59,10 +62,8 @@ class DSTWR_Ultimate_Engine:
             res = requests.get("https://api-football-v1.p.rapidapi.com/v3/teams", headers=headers, params={"league": lg["af_id"], "season": 2025})
             if res.status_code == 200:
                 for t in res.json().get('response', []):
-                    # رفع الملعب
                     v = t.get('venue', {})
                     if v.get('id'): self.push("stadiums", v['id'], {"id": v['id'], "name": v['name'], "city": v['city']}, v['name'])
-                    # رفع المدرب
                     c = t.get('coach', {})
                     if c.get('id'): self.push("coaches", c['id'], {"id": c['id'], "name": c['name']}, c['name'])
             time.sleep(0.5)
@@ -104,8 +105,12 @@ class DSTWR_Ultimate_Engine:
         self.fetch_top_stats()
         self.fetch_news()
         self.fetch_matches()
+        
+        logging.info("------------------------------------------")
+        logging.info(f"📊 تقرير المزامنة النهائي:")
+        logging.info(f"✅ تم إضافة: {self.stats['added']} عنصر جديد.")
+        logging.info(f"⏭️ تم تخطي: {self.stats['skipped']} عنصر مكرر.")
         logging.info("🏆 انتهت المهمة بنجاح وأمان!")
 
 if __name__ == "__main__":
     DSTWR_Ultimate_Engine().start()
-                        
