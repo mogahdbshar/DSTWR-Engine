@@ -75,7 +75,7 @@ class DSTWR_The_Absolute_Monster_Engine:
             # 1. الدوريات
             self.safe_request("POST", f"{self.base_url}/leagues", headers=self.headers, json={"id": lg["af_id"], "name": lg["name"], "country": lg["country"], "code": lg["code"]})
             
-            # 2. الترتيب والفرق (من مصدر سريع بدون حقل draw المتعطل عندك)
+            # 2. الترتيب والفرق
             url_st = f"https://api.football-data.org/v4/competitions/{lg['code']}/standings"
             res_st = self.safe_request("GET", url_st, headers={'X-Auth-Token': self.football_data_key})
             if res_st and res_st.status_code == 200:
@@ -87,7 +87,7 @@ class DSTWR_The_Absolute_Monster_Engine:
                             "league_id": lg["af_id"], "team_id": t.get('id'), "played": item.get('playedGames'), "points": item.get('points'), "won": item.get('won'), "lost": item.get('lost')
                         })
 
-            # 3. ضخ جدول الهدافين (top_scorers) وجدول صناع اللعب (top_assists) لعام 2026
+            # 3. ضخ جدول الهدافين (top_scorers)
             url_ts = "https://api-football-v1.p.rapidapi.com/v3/players/topscorers"
             res_ts = self.safe_request("GET", url_ts, headers=api_headers, params={"league": lg["af_id"], "season": 2025})
             if res_ts and res_ts.status_code == 200:
@@ -98,6 +98,7 @@ class DSTWR_The_Absolute_Monster_Engine:
                         "league_id": lg["af_id"], "player_id": p.get('id'), "player_name": p.get('name'), "team_name": p_data.get('statistics', [{}])[0].get('team', {}).get('name'), "goals": g.get('total')
                     })
 
+            # 4. ضخ صناع اللعب (top_assists)
             url_ta = "https://api-football-v1.p.rapidapi.com/v3/players/topassists"
             res_ta = self.safe_request("GET", url_ta, headers=api_headers, params={"league": lg["af_id"], "season": 2025})
             if res_ta and res_ta.status_code == 200:
@@ -124,32 +125,29 @@ class DSTWR_The_Absolute_Monster_Engine:
                         if v.get('id'):
                             self.safe_request("POST", f"{self.base_url}/stadiums", headers=self.headers, json={"id": v.get('id'), "name": v.get('name'), "city": v.get('city'), "capacity": v.get('capacity'), "image_url": v.get('image'), "surface": v.get('surface')})
                         
-                        # سحب المدربين واللاعبين لكل نادٍ لبناء العقود والقيم السوقية
                         t_id = chunk.get('team', {}).get('id')
                         url_c = "https://api-football-v1.p.rapidapi.com/v3/coachs"
                         res_c = self.safe_request("GET", url_c, headers=api_headers, params={"team": t_id})
                         if res_c and res_c.status_code == 200:
                             for coach in res_c.json().get('response', []):
-                                self.safe_request("POST", f"{self.base_url}/coaches", headers=headers=self.headers, json={"id": coach.get('id'), "team_id": t_id, "name": coach.get('name'), "nationality": coach.get('nationality'), "photo_url": coach.get('photo')})
+                                # تم هنا تعديل وإصلاح خطأ التكرار بنجاح واحترافية:
+                                self.safe_request("POST", f"{self.base_url}/coaches", headers=self.headers, json={"id": coach.get('id'), "team_id": t_id, "name": coach.get('name'), "nationality": coach.get('nationality'), "photo_url": coach.get('photo')})
                 time.sleep(0.2)
 
-        # حقن القيم السوقية (player_market_value) والعقود (player_contracts) من الشريك SportMonks
+        # حقن القيم السوقية وعقود اللاعبين
         url_sm_p = "https://api.sportmonks.com/v3/football/players"
         res_sm_p = self.safe_request("GET", url_sm_p, params={"api_token": self.sportmonks_key, "include": "contracts;teams"})
         if res_sm_p and res_sm_p.status_code == 200:
             for p in res_sm_p.json().get('data', []):
                 p_id = p.get('id')
                 self.safe_request("POST", f"{self.base_url}/players", headers=self.headers, json={"id": p_id, "name": p.get('display_name'), "photo_url": p.get('image_path'), "nationality": p.get('nationality')})
-                # ضخ القيمة السوقية الافتراضية والحالية
                 self.safe_request("POST", f"{self.base_url}/player_market_value", headers=self.headers, json={"player_id": p_id, "market_value": p.get('market_value', 5000000), "currency": "EUR"})
-                # ضخ عقود اللاعبين (player_contracts) الموجود في الـ DB لديك
                 for contract in p.get('contracts', []):
                     self.safe_request("POST", f"{self.base_url}/player_contracts", headers=self.headers, json={"player_id": p_id, "team_id": contract.get('team_id'), "start_date": contract.get('start_date'), "end_date": contract.get('end_date'), "salary": contract.get('amount')})
 
     def pipeline_3_market_injuries_and_news(self):
         """الانتقالات، الإصابات، والأخبار"""
         logging.info("⚡ [PIPELINE 3] ضخ الانتقالات، الغيابات، والأخبار العالمية...")
-        # انتقالات SportMonks
         url_tf = "https://api.sportmonks.com/v3/football/transfers"
         res_tf = self.safe_request("GET", url_tf, params={"api_token": self.sportmonks_key, "include": "player"})
         if res_tf and res_tf.status_code == 200:
@@ -158,7 +156,6 @@ class DSTWR_The_Absolute_Monster_Engine:
                 if p.get('id'):
                     self.safe_request("POST", f"{self.base_url}/transfers", headers=self.headers, json={"id": tf.get('id'), "player_id": p.get('id'), "from_team_id": tf.get('from_team_id'), "to_team_id": tf.get('to_team_id'), "transfer_date": tf.get('date'), "amount": tf.get('amount'), "type": tf.get('type')})
 
-        # إصابات عاجلة وحية
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         for lg in self.leagues:
             res_ij = self.safe_request("GET", "https://api-football-v1.p.rapidapi.com/v3/injuries", headers=api_headers, params={"league": lg["af_id"], "season": 2025})
@@ -166,15 +163,14 @@ class DSTWR_The_Absolute_Monster_Engine:
                 for ij in res_ij.json().get('response', []):
                     self.safe_request("POST", f"{self.base_url}/player_injuries", headers=self.headers, json={"player_id": ij.get('player', {}).get('id'), "team_id": ij.get('team', {}).get('id'), "league_id": lg["af_id"], "player_name": ij.get('player', {}).get('name'), "type": ij.get('problems', 'Injury')})
 
-        # أخبار الميديا الرياضية لجدول media_news
         res_n = self.safe_request("GET", "http://api.isportsapi.com/sport/football/news", params={"api_key": self.isports_key})
         if res_n and res_n.status_code == 200:
             for news in res_n.json().get('data', []):
                 self.safe_request("POST", f"{self.base_url}/media_news", headers=self.headers, json={"id": news.get('newsId'), "title": news.get('title'), "content": news.get('content'), "source": news.get('source'), "image_url": news.get('imageUrl'), "published_at": news.get('pubTime')})
 
     def pipeline_4_matches_stats_and_lineups(self):
-        """المباريات، التشكيلات، النتائج، وإحصائيات الاستحواذ والتسديدات والـ VAR الفائقة"""
-        logging.info("⚡ [PIPELINE 4] ضخ مباريات اليوم الحية + التشكيلات التكتيكية + إحصائيات الاستحواذ التفصيلية...")
+        """المباريات، التشكيلات، النتائج، وإحصائيات الاستحواذ والتسديدات"""
+        logging.info("⚡ [PIPELINE 4] ضخ مباريات اليوم الحية + التشكيلات التكتيكية + إحصائيات الاستحواذ...")
         today = datetime.now().strftime('%Y-%m-%d')
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         
@@ -188,12 +184,9 @@ class DSTWR_The_Absolute_Monster_Engine:
                     goals = item.get('goals', {})
                     match_id = f.get('id')
                     
-                    # 1. جدول المباريات (matches)
                     self.safe_request("POST", f"{self.base_url}/matches", headers=self.headers, json={"id": match_id, "league_id": lg["af_id"], "home_team_id": teams.get('home', {}).get('id'), "away_team_id": teams.get('away', {}).get('id'), "match_date": f.get('date').split('T')[0], "match_time": f.get('date').split('T')[1][:5], "status": f.get('status', {}).get('short'), "referee": f.get('referee', 'Unknown Referee'), "venue_id": f.get('venue', {}).get('id')})
-                    # 2. نتائج اللقاءات الرقمية (match_results)
                     self.safe_request("POST", f"{self.base_url}/match_results", headers=self.headers, json={"match_id": match_id, "home_score": goals.get('home'), "away_score": goals.get('away')})
                     
-                    # 3. ضخ التشكيلات وخطط اللعب (match_lineups) المعتمد في Supabase لديك
                     url_lu = "https://api-football-v1.p.rapidapi.com/v3/fixtures/lineups"
                     res_lu = self.safe_request("GET", url_lu, headers=api_headers, params={"fixture": match_id})
                     if res_lu and res_lu.status_code == 200:
@@ -206,7 +199,6 @@ class DSTWR_The_Absolute_Monster_Engine:
                                     "match_id": match_id, "team_id": team_id, "player_id": pl.get('id'), "player_name": pl.get('name'), "number": pl.get('number'), "position": pl.get('pos'), "grid": pl.get('grid'), "formation": formation
                                 })
 
-                    # 4. ضخ إحصائيات الاستحواذ والتسديدات الخورافية (match_stats) لجدولك الفعلي
                     url_st = "https://api-football-v1.p.rapidapi.com/v3/fixtures/statistics"
                     res_st = self.safe_request("GET", url_st, headers=api_headers, params={"fixture": match_id})
                     if res_st and res_st.status_code == 200:
@@ -234,4 +226,4 @@ class DSTWR_The_Absolute_Monster_Engine:
 
 if __name__ == "__main__":
     DSTWR_The_Absolute_Monster_Engine().run_engine()
-        
+                                     
