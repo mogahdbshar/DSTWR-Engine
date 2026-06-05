@@ -1,16 +1,29 @@
 name: DSTWR Auto-Sync
+
 on:
+  push:
+    branches:
+      - main
   schedule:
-    - cron: '*/10 * * * *' 
+    - cron: '*/10 * * * *'
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install requests
+
       - name: Run Engine
-        run: |
-          python main.py
+        run: python main.py
         env:
           ISPORTS_KEY: ${{ secrets.ISPORTS_KEY }}
           SPORTMONKS_KEY: ${{ secrets.SPORTMONKS_KEY }}
@@ -21,10 +34,9 @@ jobs:
         run: |
           git config --global user.name 'DSTWR-Bot'
           git config --global user.email 'bot@dstwr.com'
-          # استخدام اليوزر نيم الخاص بك للربط
           git clone https://${{ secrets.GH_TOKEN }}@github.com/mogahdbshar/DSTWR-Data.git
           cp live_data.json DSTWR-Data/
           cd DSTWR-Data
-          git add .
-          git commit -m "Update live data [Automated]"
+          git add live_data.json
+          git commit -m "Update live data [Automated]" || echo "No changes to commit"
           git push
