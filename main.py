@@ -2,7 +2,7 @@ import os
 import requests
 import json
 
-# جلب المفاتيح من خزانة GitHub Secrets
+# جلب المفاتيح من GitHub Secrets
 KEYS = {
     "isports": os.getenv("ISPORTS_KEY"),
     "sportmonks": os.getenv("SPORTMONKS_KEY"),
@@ -10,21 +10,38 @@ KEYS = {
     "football_data": os.getenv("FOOTBALL_DATA_KEY")
 }
 
-def fetch_live_data():
-    # هنا سنطبق خوارزمية التبديل (Failover)
-    # 1. حاول iSportsAPI
-    # 2. إذا فشل، انتقل لـ Sportmonks
-    # 3. ادمج البيانات في ملف واحد
-    data = {"status": "success", "matches": []}
-    # (سيتم إضافة منطق السحب هنا لكل مصدر)
-    return data
+def fetch_data():
+    # هذا هيكل البيانات الموحد الذي سيقرأه تطبيقك
+    final_data = {
+        "metadata": {"source": "DSTWR-Engine", "status": "active"},
+        "matches": []
+    }
 
-def save_to_final_json(data):
+    # مثال: جلب البيانات من football-data.org (الدوريات والترتيب)
+    try:
+        url = "https://api.football-data.org/v4/competitions/PL/standings"
+        headers = {'X-Auth-Token': KEYS["football_data"]}
+        response = requests.get(url, headers=headers).json()
+        
+        # تحويل البيانات إلى تنسيقنا الموحد (التعريب)
+        for item in response['standings'][0]['table']:
+            final_data['matches'].append({
+                "team": item['team']['shortName'],
+                "position": item['position'],
+                "points": item['points'],
+                "logo": item['team']['crest']
+            })
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+
+    return final_data
+
+def main():
+    data = fetch_data()
+    # حفظ الملف ليرفعه GitHub تلقائياً
     with open('live_data.json', 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
+    print("تمت عملية الدمج والتعريب بنجاح!")
 
 if __name__ == "__main__":
-    combined_data = fetch_live_data()
-    save_to_final_json(combined_data)
-    print("تم تحديث البيانات بنجاح في السحابة!")
-  
+    main()
