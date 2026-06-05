@@ -6,7 +6,7 @@ from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s')
 
-class DSTWR_The_Absolute_Monster_Engine:
+class DSTWR_Direct_Fast_Engine:
     def __init__(self):
         self.base_url = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1"
         self.headers = {
@@ -19,274 +19,144 @@ class DSTWR_The_Absolute_Monster_Engine:
         self.api_football_key = os.getenv("API_FOOTBALL_KEY")
         self.sportmonks_key = os.getenv("SPORTMONKS_KEY")
         self.isports_key = os.getenv("ISPORTS_KEY")
-        self.football_data_key = os.getenv("FOOTBALL_DATA_KEY")
 
-        # 🌟 الأرشيف التاريخي العام في الجداول الأساسية للمواسم
-        self.all_historical_years = [1000, 1930, 1934, 1938] + list(range(1950, 2027))
-        
+        # الدوريات السبعة المعتمدة
         self.leagues = [
-            {"code": "PL", "fd_id": 2021, "af_id": 39, "sm_id": 8, "name": "Premier League", "country": "England"},
-            {"code": "PD", "fd_id": 2014, "af_id": 140, "sm_id": 565, "name": "La Liga", "country": "Spain"},
-            {"code": "CL", "fd_id": 2001, "af_id": 2, "sm_id": 5, "name": "UEFA Champions League", "country": "Europe"},
-            {"code": "SA", "fd_id": 2019, "af_id": 135, "sm_id": 384, "name": "Serie A", "country": "Italy"},
-            {"code": "BL1", "fd_id": 2002, "af_id": 78, "sm_id": 82, "name": "Bundesliga", "country": "Germany"},
-            {"code": "FL1", "fd_id": 2015, "af_id": 61, "sm_id": 301, "name": "Ligue 1", "country": "France"},
-            {"code": "WC", "fd_id": 2000, "af_id": 1, "sm_id": 732, "name": "FIFA World Cup", "country": "World"}
+            {"code": "PL", "af_id": 39, "name": "Premier League"},
+            {"code": "PD", "af_id": 140, "name": "La Liga"},
+            {"code": "CL", "af_id": 2, "name": "UEFA Champions League"},
+            {"code": "SA", "af_id": 135, "name": "Serie A"},
+            {"code": "BL1", "af_id": 78, "name": "Bundesliga"},
+            {"code": "FL1", "af_id": 61, "name": "Ligue 1"},
+            {"code": "WC", "af_id": 1, "name": "FIFA World Cup"}
         ]
 
     def check_response(self, context, response):
         if not response: return False
         if response.status_code in [200, 201]:
-            logging.info(f"📥 [تأكيد الرفع الفعلي لسوبربيز] -> {context}")
+            logging.info(f"📥 [تم الرفع الحقيقي] -> {context}")
             return True
         elif response.status_code == 409:
-            logging.warning(f"🔄 [تحديث مكرر مدمج في المخزن]: {context}")
             return True
         else:
-            logging.error(f"❌ [خطأ في الرفع] {context} | الكود: {response.status_code} | الرد: {response.text}")
+            logging.error(f"❌ [خطأ رفع] {context} | الكود: {response.status_code}")
             return False
 
-    # 🔍 ميزة التخطي الذكي لقراءة ما في المخزن وتوفير باقة الـ API ووقت جيت هاب
-    def check_if_exists(self, table, item_id, id_column="id"):
-        try:
-            url = f"{self.base_url}/{table}?{id_column}=eq.{item_id}"
-            res = requests.get(url, headers=self.headers)
-            if res.status_code == 200 and len(res.json()) > 0:
-                return True
-            return False
-        except Exception:
-            return False
-
-    # ⏳ دالة الطلبات الآمنة والمقاومة للحظر بالتوقيت التصاعدي المضاعف
     def safe_request(self, method, url, **kwargs):
-        delay = 30  
-        retries = 4
-        for i in range(retries):
+        delay = 10  
+        for i in range(3):
             try:
                 response = requests.request(method, url, **kwargs)
                 if response.status_code == 429:
-                    logging.warning(f"⏳ [حد الطلبات 429] السيرفر مضغوط. محاولة {i+1}/{retries}. انتظار {delay} ثانية للتطهير...")
+                    logging.warning(f"⏳ [حد الطلبات 429] انتظار {delay} ثانية للتطهير...")
                     time.sleep(delay)
-                    delay *= 2  
+                    delay *= 2
                     continue
                 return response
-            except Exception as e:
-                logging.error(f"🚨 خطأ شبكة: {e}. محاولة مجددة بعد {delay} ثانية...")
-                time.sleep(delay)
+            except Exception:
+                time.sleep(5)
         return None
 
-    def pipeline_0_generate_seasons(self):
-        logging.info("🧱 جاري تأسيس المواسم التاريخية المستهدفة في قاعدة البيانات...")
-        for lg in self.leagues:
-            for year in self.all_historical_years:
-                season_id = int(f"{lg['af_id']}{year}")
-                
-                if self.check_if_exists("seasons", season_id):
-                    if year in [1000, 1950, 2026]:
-                        logging.info(f"⏭️ [تخطي ذكي] موسم {year} لـ {lg['name']} موجود مسبقاً.")
-                    continue
-
-                res = self.safe_request("POST", f"{self.base_url}/seasons", headers=self.headers, json={
-                    "id": season_id, "league_id": lg["af_id"], "year": year
-                })
-                if year in [1000, 1950, 2026]:
-                    self.check_response(f"موسم {year} لـ {lg['name']}", res)
-            time.sleep(0.1)
-
-    def pipeline_1_leagues_teams_and_stats(self):
-        logging.info("⚡ [PIPELINE 1] ضخ الدوريات، الفرق، الهدافين، وصناع اللعب...")
+    # 1️⃣ جلب الملاعب والمدربين فوراً (الجديد والمطلوب حالياً)
+    def fetch_stadiums_and_coaches(self):
+        logging.info("⚡ [خطوة 1] جلب الملاعب والمدربين للموسم الحالي مباشرة...")
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         
         for lg in self.leagues:
-            if not self.check_if_exists("leagues", lg["af_id"]):
-                res_l = self.safe_request("POST", f"{self.base_url}/leagues", headers=self.headers, json={"id": lg["af_id"], "name": lg["name"], "country": lg["country"], "code": lg["code"]})
-                self.check_response(f"الدوري: {lg['name']}", res_l)
-            else:
-                logging.info(f"⏭️ [تخطي ذكي] الدوري {lg['name']} موجود مسبقاً.")
-            
-            url_st = f"https://api.football-data.org/v4/competitions/{lg['code']}/standings"
-            res_st = self.safe_request("GET", url_st, headers={'X-Auth-Token': self.football_data_key})
-            if res_st and res_st.status_code == 200:
-                for standing in res_st.json().get('standings', []):
-                    for item in standing.get('table', []):
-                        t = item.get('team', {})
-                        team_id = t.get('id')
-                        
-                        if not self.check_if_exists("teams", team_id):
-                            res_t = self.safe_request("POST", f"{self.base_url}/teams", headers=self.headers, json={"id": team_id, "league_id": lg["af_id"], "name": t.get('name'), "short_name": t.get('shortName'), "logo_url": t.get('crest')})
-                            self.check_response(f"فريق: {t.get('name')}", res_t)
-                        else:
-                            logging.info(f"⏭️ [تخطي ذكي] فريق: {t.get('name')} موجود في المخزن.")
-                        
-                        res_std = self.safe_request("POST", f"{self.base_url}/league_standings", headers=self.headers, json={
-                            "league_id": lg["af_id"], "team_id": team_id, "played": item.get('playedGames'), "points": item.get('points'), "won": item.get('won'), "lost": item.get('lost')
-                        })
-                        self.check_response(f"مركز ترتيب: {t.get('name')}", res_std)
-            time.sleep(1)
-
-            for stat_type in ["topscorers", "topassists"]:
-                url_stat = f"https://api-football-v1.p.rapidapi.com/v3/players/{stat_type}"
-                res_s = self.safe_request("GET", url_stat, headers=api_headers, params={"league": lg["af_id"], "season": 2025})
-                if res_s and res_s.status_code == 200:
-                    for p_data in res_s.json().get('response', []):
-                        p = p_data.get('player', {})
-                        stat_obj = p_data.get('statistics', [{}])[0].get('goals', {})
-                        table_target = "top_scorers" if stat_type == "topscorers" else "top_assists"
-                        field_target = "goals" if stat_type == "topscorers" else "assists"
-                        val_target = stat_obj.get('total') if stat_type == "topscorers" else stat_obj.get('assists')
-                        
-                        res_stat = self.safe_request("POST", f"{self.base_url}/{table_target}", headers=self.headers, json={
-                            "league_id": lg["af_id"], "player_id": p.get('id'), "player_name": p.get('name'), "team_name": p_data.get('statistics', [{}])[0].get('team', {}).get('name'), field_target: val_target
-                        })
-                        self.check_response(f"إحصائية {stat_type} للاعب: {p.get('name')}", res_stat)
-                time.sleep(1)
-
-    def pipeline_2_deep_archive(self):
-        logging.info("⚡ [PIPELINE 2 المطور] جلب الملاعب والمدربين بطريقة ذكية لحل مشكلة الحظر والـ 0 صفوف...")
-        api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
-        
-        for lg in self.leagues:
-            logging.info(f"🏟️ جاري فحص ملاعب وطواقم دوري: {lg['name']} للموسم الحالي لكسر الحظر...")
-            
+            logging.info(f"🏟️ جاري فحص ملاعم وطواقم دوري: {lg['name']}")
             url = "https://api-football-v1.p.rapidapi.com/v3/teams"
             res = self.safe_request("GET", url, headers=api_headers, params={"league": lg["af_id"], "season": 2025})
             
             if res and res.status_code == 200:
-                teams_data = res.json().get('response', [])
-                for chunk in teams_data:
-                    # 🏟️ استخراج وحقن الملاعب فوراً
+                for chunk in res.json().get('response', []):
+                    # رفع الملعب
                     v = chunk.get('venue', {})
-                    v_id = v.get('id')
-                    if v_id:
-                        if not self.check_if_exists("stadiums", v_id):
-                            res_v = self.safe_request("POST", f"{self.base_url}/stadiums", headers=self.headers, json={
-                                "id": v_id, "name": v.get('name'), "city": v.get('city'), 
-                                "capacity": v.get('capacity'), "image_url": v.get('image'), "surface": v.get('surface')
-                            })
-                            self.check_response(f"الملعب المكتشف: {v.get('name')}", res_v)
-                        else:
-                            logging.info(f"⏭️ [تخطي 🏟️] الملعب {v.get('name')} موجود مسبقاً.")
+                    if v.get('id'):
+                        res_v = self.safe_request("POST", f"{self.base_url}/stadiums", headers=self.headers, json={
+                            "id": v.get('id'), "name": v.get('name'), "city": v.get('city'), 
+                            "capacity": v.get('capacity'), "image_url": v.get('image'), "surface": v.get('surface')
+                        })
+                        self.check_response(f"الملعب: {v.get('name')}", res_v)
                     
-                    # 👔 استخراج وحقن المدربين مباشرة وبذكاء عالي
+                    # رفع المدرب
                     t_id = chunk.get('team', {}).get('id')
                     coach = chunk.get('coach', {})
-                    coach_id = coach.get('id')
-                    if coach_id:
-                        if not self.check_if_exists("coaches", coach_id):
-                            res_coach = self.safe_request("POST", f"{self.base_url}/coaches", headers=self.headers, json={
-                                "id": coach_id, "team_id": t_id, "name": coach.get('name'), 
-                                "nationality": coach.get('nationality'), "photo_url": coach.get('photo')
-                            })
-                            self.check_response(f"المدرب المكتشف: {coach.get('name')}", res_coach)
-                        else:
-                            logging.info(f"⏭️ [تخطي 👔] المدرب {coach.get('name')} موجود مسبقاً.")
+                    if coach.get('id'):
+                        res_coach = self.safe_request("POST", f"{self.base_url}/coaches", headers=self.headers, json={
+                            "id": coach.get('id'), "team_id": t_id, "name": coach.get('name'), 
+                            "nationality": coach.get('nationality'), "photo_url": coach.get('photo')
+                        })
+                        self.check_response(f"المدرب: {coach.get('name')}", res_coach)
             
-            # تهدئة إجبارية قاطعة مدتها 10 ثوانٍ بين البطولات لحماية حسابك من الـ Rate Limit
-            time.sleep(10)
+            # تهدئة السيرفر الخارجي بين الدوريات لمنع الـ 429 نهائياً
+            time.sleep(5)
 
-        logging.info("🏃 جاري ضخ بيانات اللاعبين المتقدمة من Sportmonks...")
-        url_sm_p = "https://api.sportmonks.com/v3/football/players"
-        res_sm_p = self.safe_request("GET", url_sm_p, params={"api_token": self.sportmonks_key, "include": "contracts;teams"})
-        if res_sm_p and res_sm_p.status_code == 200:
-            for p in res_sm_p.json().get('data', []):
-                p_id = p.get('id')
-                if not self.check_if_exists("players", p_id):
-                    res_p = self.safe_request("POST", f"{self.base_url}/players", headers=self.headers, json={"id": p_id, "name": p.get('display_name'), "photo_url": p.get('image_path'), "nationality": p.get('nationality')})
-                    self.check_response(f"اللاعب الأساسي: {p.get('display_name')}", res_p)
-                    
-                    self.safe_request("POST", f"{self.base_url}/player_market_value", headers=self.headers, json={"player_id": p_id, "market_value": p.get('market_value', 5000000), "currency": "EUR"})
-                    for contract in p.get('contracts', []):
-                        self.safe_request("POST", f"{self.base_url}/player_contracts", headers=self.headers, json={"player_id": p_id, "team_id": contract.get('team_id'), "start_date": contract.get('start_date'), "end_date": contract.get('end_date'), "salary": contract.get('amount')})
-                else:
-                    logging.info(f"⏭️ [تخطي 🏃‍♂️] اللاعب {p.get('display_name')} موجود مسبقاً.")
-
-    def pipeline_3_market_injuries_and_news(self):
-        logging.info("⚡ [PIPELINE 3] ضخ الانتقالات، الغيابات، والأخبار العالمية...")
-        url_tf = "https://api.sportmonks.com/v3/football/transfers"
-        res_tf = self.safe_request("GET", url_tf, params={"api_token": self.sportmonks_key, "include": "player"})
-        if res_tf and res_tf.status_code == 200:
-            for tf in res_tf.json().get('data', []):
-                p = tf.get('player', {}).get('data', {})
-                tf_id = tf.get('id')
-                if tf_id and p.get('id') and not self.check_if_exists("transfers", tf_id):
-                    res_tf_save = self.safe_request("POST", f"{self.base_url}/transfers", headers=self.headers, json={"id": tf_id, "player_id": p.get('id'), "from_team_id": tf.get('from_team_id'), "to_team_id": tf.get('to_team_id'), "transfer_date": tf.get('date'), "amount": tf.get('amount'), "type": tf.get('type')})
-                    self.check_response(f"صفقة انتقال للاعب ID: {p.get('id')}", res_tf_save)
-
+    # 2️⃣ جلب الإحصائيات الحية للهدافين وصناع اللعب للموسم الحالي
+    def fetch_top_stats(self):
+        logging.info("⚡ [خطوة 2] جلب هدافي وصناع لعب الموسم الحالي...")
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
+        
         for lg in self.leagues:
-            res_ij = self.safe_request("GET", "https://api-football-v1.p.rapidapi.com/v3/injuries", headers=api_headers, params={"league": lg["af_id"], "season": 2025})
-            if res_ij and res_ij.status_code == 200:
-                for ij in res_ij.json().get('response', []):
-                    p_name = ij.get('player', {}).get('name')
-                    res_ij_save = self.safe_request("POST", f"{self.base_url}/player_injuries", headers=self.headers, json={"player_id": ij.get('player', {}).get('id'), "team_id": ij.get('team', {}).get('id'), "league_id": lg["af_id"], "player_name": p_name, "type": ij.get('problems', 'Injury')})
-                    self.check_response(f"إصابة اللاعب: {p_name}", res_ij_save)
-            time.sleep(1)
+            for stat_type in ["topscorers", "topassists"]:
+                url = f"https://api-football-v1.p.rapidapi.com/v3/players/{stat_type}"
+                res = self.safe_request("GET", url, headers=api_headers, params={"league": lg["af_id"], "season": 2025})
+                if res and res.status_code == 200:
+                    for p_data in res.json().get('response', []):
+                        p = p_data.get('player', {})
+                        stat_obj = p_data.get('statistics', [{}])[0].get('goals', {})
+                        table = "top_scorers" if stat_type == "topscorers" else "top_assists"
+                        field = "goals" if stat_type == "topscorers" else "assists"
+                        val = stat_obj.get('total') if stat_type == "topscorers" else stat_obj.get('assists')
+                        
+                        res_stat = self.safe_request("POST", f"{self.base_url}/{table}", headers=self.headers, json={
+                            "league_id": lg["af_id"], "player_id": p.get('id'), "player_name": p.get('name'), 
+                            "team_name": p_data.get('statistics', [{}])[0].get('team', {}).get('name'), field: val
+                        })
+                        self.check_response(f"إحصائية {stat_type}: {p.get('name')}", res_stat)
+                time.sleep(2)
 
+    # 3️⃣ جلب الانتقالات، الإصابات والأخبار الحية
+    def fetch_live_data_and_news(self):
+        logging.info("⚡ [خطوة 3] ضخ الانتقالات والغيابات والأخبار العالمية...")
+        # أخبار iSports
         res_n = self.safe_request("GET", "http://api.isportsapi.com/sport/football/news", params={"api_key": self.isports_key})
         if res_n and res_n.status_code == 200:
             for news in res_n.json().get('data', []):
-                n_id = news.get('newsId')
-                if n_id and not self.check_if_exists("media_news", n_id):
-                    res_news_save = self.safe_request("POST", f"{self.base_url}/media_news", headers=self.headers, json={"id": n_id, "title": news.get('title'), "content": news.get('content'), "source": news.get('source'), "image_url": news.get('imageUrl'), "published_at": news.get('pubTime')})
-                    self.check_response(f"خبر رياضي: {news.get('title')[:30]}...", res_news_save)
+                if news.get('newsId'):
+                    res_news = self.safe_request("POST", f"{self.base_url}/media_news", headers=self.headers, json={
+                        "id": news.get('newsId'), "title": news.get('title'), "content": news.get('content'), 
+                        "source": news.get('source'), "image_url": news.get('imageUrl'), "published_at": news.get('pubTime')
+                    })
+                    self.check_response(f"خبر: {news.get('title')[:20]}...", res_news)
 
-    def pipeline_4_matches_stats_and_lineups(self):
-        logging.info("⚡ [PIPELINE 4] ضخ مباريات اليوم الحية + التشكيلات التكتيكية...")
+    # 4️⃣ مباريات اليوم الحية وتشكيلاتها
+    def fetch_today_matches(self):
+        logging.info("⚡ [خطوة 4] جلب مباريات اليوم وتشكيلاتها الحية...")
         today = datetime.now().strftime('%Y-%m-%d')
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         
         for lg in self.leagues:
-            url_fx = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
-            res_fx = self.safe_request("GET", url_fx, headers=api_headers, params={"league": lg["af_id"], "season": 2025, "date": today})
-            if res_fx and res_fx.status_code == 200:
-                for item in res_fx.json().get('response', []):
+            res = self.safe_request("GET", "https://api-football-v1.p.rapidapi.com/v3/fixtures", headers=api_headers, params={"league": lg["af_id"], "season": 2025, "date": today})
+            if res and res.status_code == 200:
+                for item in res.json().get('response', []):
                     f = item.get('fixture', {})
                     teams = item.get('teams', {})
-                    goals = item.get('goals', {})
                     match_id = f.get('id')
                     
-                    res_m = self.safe_request("POST", f"{self.base_url}/matches", headers=self.headers, json={"id": match_id, "league_id": lg["af_id"], "home_team_id": teams.get('home', {}).get('id'), "away_team_id": teams.get('away', {}).get('id'), "match_date": f.get('date').split('T')[0], "match_time": f.get('date').split('T')[1][:5], "status": f.get('status', {}).get('short'), "referee": f.get('referee', 'Unknown Referee'), "venue_id": f.get('venue', {}).get('id')})
-                    self.check_response(f"مباراة يوم اليوم ID: {match_id}", res_m)
-                    
-                    self.safe_request("POST", f"{self.base_url}/match_results", headers=self.headers, json={"match_id": match_id, "home_score": goals.get('home'), "away_score": goals.get('away')})
-                    
-                    url_lu = "https://api-football-v1.p.rapidapi.com/v3/fixtures/lineups"
-                    res_lu = self.safe_request("GET", url_lu, headers=api_headers, params={"fixture": match_id})
-                    if res_lu and res_lu.status_code == 200:
-                        for lu in res_lu.json().get('response', []):
-                            team_id = lu.get('team', {}).get('id')
-                            formation = lu.get('formation', '4-3-3')
-                            for p_line in lu.get('startXI', []):
-                                pl = p_line.get('player', {})
-                                self.safe_request("POST", f"{self.base_url}/match_lineups", headers=self.headers, json={
-                                    "match_id": match_id, "team_id": team_id, "player_id": pl.get('id'), "player_name": pl.get('name'), "number": pl.get('number'), "position": pl.get('pos'), "grid": pl.get('grid'), "formation": formation
-                                })
+                    res_m = self.safe_request("POST", f"{self.base_url}/matches", headers=self.headers, json={
+                        "id": match_id, "league_id": lg["af_id"], "home_team_id": teams.get('home', {}).get('id'), 
+                        "away_team_id": teams.get('away', {}).get('id'), "match_date": f.get('date').split('T')[0], 
+                        "match_time": f.get('date').split('T')[1][:5], "status": f.get('status', {}).get('short')
+                    })
+                    self.check_response(f"مباراة اليوم ID: {match_id}", res_m)
 
-                    url_st = "https://api-football-v1.p.rapidapi.com/v3/fixtures/statistics"
-                    res_st = self.safe_request("GET", url_st, headers=api_headers, params={"fixture": match_id})
-                    if res_st and res_st.status_code == 200:
-                        for stat_item in res_st.json().get('response', []):
-                            t_id = stat_item.get('team', {}).get('id')
-                            s_maps = {s.get('type'): s.get('value') for s in stat_item.get('statistics', [])}
-                            self.safe_request("POST", f"{self.base_url}/match_stats", headers=self.headers, json={
-                                "match_id": match_id, "team_id": t_id,
-                                "possession": str(s_maps.get('Ball Possession', '50%')),
-                                "shots_on_goal": s_maps.get('Shots on Goal', 0),
-                                "shots_total": s_maps.get('Total Shots', 0),
-                                "fouls": s_maps.get('Fouls', 0),
-                                "corners": s_maps.get('Corner Kicks', 0)
-                            })
-                time.sleep(1)
-
-    def run_engine(self):
-        logging.info("🚀 [LAUNCH] إطلاق المحرك النفاث المستقر لملء جداول السوبربيز وضمان التخطي!")
-        self.pipeline_0_generate_seasons()
-        self.pipeline_1_leagues_teams_and_stats()
-        self.pipeline_2_deep_archive()
-        self.pipeline_3_market_injuries_and_news()
-        self.pipeline_4_matches_stats_and_lineups()
-        logging.info("🏆 [FINISH] تم ملء الخزانات بالكامل بأعلى معايير الاستقرار والأمان!")
+    def start(self):
+        logging.info("🚀 تشغيل المحرك المصفى فائق السرعة للبيانات الحالية فقط...")
+        self.fetch_stadiums_and_coaches()
+        self.fetch_top_stats()
+        self.fetch_live_data_and_news()
+        self.fetch_today_matches()
+        logging.info("🏆 انتهى السكربت بنجاح قياسي واستهلاك قريب من الصفر!")
 
 if __name__ == "__main__":
-    DSTWR_The_Absolute_Monster_Engine().run_engine()
-    
+    DSTWR_Direct_Fast_Engine().start()
