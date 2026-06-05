@@ -1,0 +1,26 @@
+name: DSTWR Auto-Sync
+on:
+  schedule:
+    - cron: '*/1 * * * *' # تحديث كل دقيقة
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run Engine
+        run: python main.py
+        env:
+          ISPORTS_KEY: ${{ secrets.ISPORTS_KEY }}
+          SPORTMONKS_KEY: ${{ secrets.SPORTMONKS_KEY }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+      - name: Push to Data Repo
+        run: |
+          # هنا سنضيف كود رفع ملف live_data.json إلى مستودع DSTWR-Data
+          
