@@ -40,18 +40,18 @@ class DSTWR_The_Absolute_Monster_Engine:
     def check_response(self, context, response):
         if not response: return
         if response.status_code in [200, 201]:
-            logging.info(f"✅ [حفظ]: {context}")
+            logging.info(f"📥 [تم الرفع إلى المخزن بنجاح] -> {context}")
         elif response.status_code == 409:
-            logging.warning(f"🔄 [تحديث مكرر]: {context}")
+            logging.warning(f"🔄 [تحديث مكرر مدمج في المخزن]: {context}")
         else:
-            logging.error(f"❌ [خطأ] {context} | الكود: {response.status_code} | الرد: {response.text}")
+            logging.error(f"❌ [خطأ في الرفع] {context} | الكود: {response.status_code} | الرد: {response.text}")
 
     def safe_request(self, method, url, **kwargs):
         try:
             response = requests.request(method, url, **kwargs)
             if response.status_code == 429:
-                logging.warning("⏳ [حد الطلبات] السيرفر مضغوط، انتظار 30 ثانية لتجنب الحظر...")
-                time.sleep(30)
+                logging.warning("⏳ [حد الطلبات] السيرفر مضغوط، انتظار 15 ثانية لتجنب الحظر...")
+                time.sleep(15)
                 return requests.request(method, url, **kwargs)
             return response
         except Exception as e:
@@ -66,8 +66,8 @@ class DSTWR_The_Absolute_Monster_Engine:
                     "id": int(f"{lg['af_id']}{year}"), "league_id": lg["af_id"], "year": year
                 })
                 if year in [1000, 1950, 2026]:
-                    self.check_response(f"تأسيس موسم {year} لـ {lg['name']}", res)
-            time.sleep(0.2)
+                    self.check_response(f"موسم {year} لـ {lg['name']}", res)
+            time.sleep(0.1)
 
     def pipeline_1_leagues_teams_and_stats(self):
         logging.info("⚡ [PIPELINE 1] ضخ الدوريات، الفرق، الهدافين، وصناع اللعب...")
@@ -86,12 +86,12 @@ class DSTWR_The_Absolute_Monster_Engine:
                         res_t = self.safe_request("POST", f"{self.base_url}/teams", headers=self.headers, json={"id": t.get('id'), "league_id": lg["af_id"], "name": t.get('name'), "short_name": t.get('shortName'), "logo_url": t.get('crest')})
                         self.check_response(f"فريق: {t.get('name')}", res_t)
                         
-                        self.safe_request("POST", f"{self.base_url}/league_standings", headers=self.headers, json={
+                        res_std = self.safe_request("POST", f"{self.base_url}/league_standings", headers=self.headers, json={
                             "league_id": lg["af_id"], "team_id": t.get('id'), "played": item.get('playedGames'), "points": item.get('points'), "won": item.get('won'), "lost": item.get('lost')
                         })
-            time.sleep(1.0) # تهدئة لحماية مفتاح الترتيب
+                        self.check_response(f"مركز ترتيب: {t.get('name')}", res_std)
+            time.sleep(0.5)
 
-            # الهدافين وصناع اللعب
             for stat_type in ["topscorers", "topassists"]:
                 url_stat = f"https://api-football-v1.p.rapidapi.com/v3/players/{stat_type}"
                 res_s = self.safe_request("GET", url_stat, headers=api_headers, params={"league": lg["af_id"], "season": 2025})
@@ -103,17 +103,20 @@ class DSTWR_The_Absolute_Monster_Engine:
                         field_target = "goals" if stat_type == "topscorers" else "assists"
                         val_target = stat_obj.get('total') if stat_type == "topscorers" else stat_obj.get('assists')
                         
-                        self.safe_request("POST", f"{self.base_url}/{table_target}", headers=self.headers, json={
+                        res_stat = self.safe_request("POST", f"{self.base_url}/{table_target}", headers=self.headers, json={
                             "league_id": lg["af_id"], "player_id": p.get('id'), "player_name": p.get('name'), "team_name": p_data.get('statistics', [{}])[0].get('team', {}).get('name'), field_target: val_target
                         })
-                time.sleep(1.0) # تأخير ذكي لحماية المفتاح
+                        self.check_response(f"إحصائية {stat_type} للاعب: {p.get('name')}", res_stat)
+                time.sleep(0.5)
 
     def pipeline_2_deep_archive(self):
-        logging.info("⚡ [PIPELINE 2] جلب الملاعب والمدربين التاريخيين (2010 - 2026)...")
+        logging.info("⚡ [PIPELINE 2] جلب الملاعب والمدربين التاريخيين الذكي السرعة القصوى (2010 - 2026)...")
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         
         for lg in self.leagues:
-            logging.info(f"🏟️ جاري فحص ملاعب ومدربي دوري: {lg['name']}")
+            logging.info(f"🏟️ جاري فحص ملاعب دوري: {lg['name']}")
+            tracked_teams = set()
+            
             for season in self.api_supported_seasons:
                 url = "https://api-football-v1.p.rapidapi.com/v3/teams"
                 res = self.safe_request("GET", url, headers=api_headers, params={"league": lg["af_id"], "season": season})
@@ -123,25 +126,33 @@ class DSTWR_The_Absolute_Monster_Engine:
                     for chunk in teams_data:
                         v = chunk.get('venue', {})
                         if v.get('id'):
-                            self.safe_request("POST", f"{self.base_url}/stadiums", headers=self.headers, json={"id": v.get('id'), "name": v.get('name'), "city": v.get('city'), "capacity": v.get('capacity'), "image_url": v.get('image'), "surface": v.get('surface')})
+                            res_v = self.safe_request("POST", f"{self.base_url}/stadiums", headers=self.headers, json={"id": v.get('id'), "name": v.get('name'), "city": v.get('city'), "capacity": v.get('capacity'), "image_url": v.get('image'), "surface": v.get('surface')})
+                            self.check_response(f"الملعب: {v.get('name')}", res_v)
                         
                         t_id = chunk.get('team', {}).get('id')
-                        url_c = "https://api-football-v1.p.rapidapi.com/v3/coachs"
-                        res_c = self.safe_request("GET", url_c, headers=api_headers, params={"team": t_id})
-                        if res_c and res_c.status_code == 200:
-                            for coach in res_c.json().get('response', []):
-                                self.safe_request("POST", f"{self.base_url}/coaches", headers=self.headers, json={"id": coach.get('id'), "team_id": t_id, "name": coach.get('name'), "nationality": coach.get('nationality'), "photo_url": coach.get('photo')})
+                        if t_id:
+                            tracked_teams.add(t_id)
                 
-                # 🛑 السر السحري هنا: ننام ثانيتين كاملتين بعد كل موسم لكي يهدأ سيرفر الـ API ولا يحظرنا أبداً
-                time.sleep(2.0)
+                time.sleep(0.5)
 
-        # لاعبين وعقود SportMonks
+            logging.info(f"👔 جاري جلب مدربي فرق دوري {lg['name']} بدون تكرار...")
+            for team_id in tracked_teams:
+                url_c = "https://api-football-v1.p.rapidapi.com/v3/coachs"
+                res_c = self.safe_request("GET", url_c, headers=api_headers, params={"team": team_id})
+                if res_c and res_c.status_code == 200:
+                    for coach in res_c.json().get('response', []):
+                        res_coach = self.safe_request("POST", f"{self.base_url}/coaches", headers=self.headers, json={"id": coach.get('id'), "team_id": team_id, "name": coach.get('name'), "nationality": coach.get('nationality'), "photo_url": coach.get('photo')})
+                        self.check_response(f"المدرب: {coach.get('name')}", res_coach)
+                time.sleep(0.5)
+
         url_sm_p = "https://api.sportmonks.com/v3/football/players"
         res_sm_p = self.safe_request("GET", url_sm_p, params={"api_token": self.sportmonks_key, "include": "contracts;teams"})
         if res_sm_p and res_sm_p.status_code == 200:
             for p in res_sm_p.json().get('data', []):
                 p_id = p.get('id')
-                self.safe_request("POST", f"{self.base_url}/players", headers=self.headers, json={"id": p_id, "name": p.get('display_name'), "photo_url": p.get('image_path'), "nationality": p.get('nationality')})
+                res_p = self.safe_request("POST", f"{self.base_url}/players", headers=self.headers, json={"id": p_id, "name": p.get('display_name'), "photo_url": p.get('image_path'), "nationality": p.get('nationality')})
+                self.check_response(f"اللاعب الأساسي: {p.get('display_name')}", res_p)
+                
                 self.safe_request("POST", f"{self.base_url}/player_market_value", headers=self.headers, json={"player_id": p_id, "market_value": p.get('market_value', 5000000), "currency": "EUR"})
                 for contract in p.get('contracts', []):
                     self.safe_request("POST", f"{self.base_url}/player_contracts", headers=self.headers, json={"player_id": p_id, "team_id": contract.get('team_id'), "start_date": contract.get('start_date'), "end_date": contract.get('end_date'), "salary": contract.get('amount')})
@@ -154,20 +165,23 @@ class DSTWR_The_Absolute_Monster_Engine:
             for tf in res_tf.json().get('data', []):
                 p = tf.get('player', {}).get('data', {})
                 if p.get('id'):
-                    self.safe_request("POST", f"{self.base_url}/transfers", headers=self.headers, json={"id": tf.get('id'), "player_id": p.get('id'), "from_team_id": tf.get('from_team_id'), "to_team_id": tf.get('to_team_id'), "transfer_date": tf.get('date'), "amount": tf.get('amount'), "type": tf.get('type')})
+                    res_tf_save = self.safe_request("POST", f"{self.base_url}/transfers", headers=self.headers, json={"id": tf.get('id'), "player_id": p.get('id'), "from_team_id": tf.get('from_team_id'), "to_team_id": tf.get('to_team_id'), "transfer_date": tf.get('date'), "amount": tf.get('amount'), "type": tf.get('type')})
+                    self.check_response(f"صفقة انتقال للاعب ID: {p.get('id')}", res_tf_save)
 
         api_headers = {"X-RapidAPI-Key": self.api_football_key, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
         for lg in self.leagues:
             res_ij = self.safe_request("GET", "https://api-football-v1.p.rapidapi.com/v3/injuries", headers=api_headers, params={"league": lg["af_id"], "season": 2025})
             if res_ij and res_ij.status_code == 200:
                 for ij in res_ij.json().get('response', []):
-                    self.safe_request("POST", f"{self.base_url}/player_injuries", headers=self.headers, json={"player_id": ij.get('player', {}).get('id'), "team_id": ij.get('team', {}).get('id'), "league_id": lg["af_id"], "player_name": ij.get('player', {}).get('name'), "type": ij.get('problems', 'Injury')})
-            time.sleep(1.0)
+                    res_ij_save = self.safe_request("POST", f"{self.base_url}/player_injuries", headers=self.headers, json={"player_id": ij.get('player', {}).get('id'), "team_id": ij.get('team', {}).get('id'), "league_id": lg["af_id"], "player_name": ij.get('player', {}).get('name'), "type": ij.get('problems', 'Injury')})
+                    self.check_response(f"إصابة اللاعب: {ij.get('player', {}).get('name')}", res_ij_save)
+            time.sleep(0.5)
 
         res_n = self.safe_request("GET", "http://api.isportsapi.com/sport/football/news", params={"api_key": self.isports_key})
         if res_n and res_n.status_code == 200:
             for news in res_n.json().get('data', []):
-                self.safe_request("POST", f"{self.base_url}/media_news", headers=self.headers, json={"id": news.get('newsId'), "title": news.get('title'), "content": news.get('content'), "source": news.get('source'), "image_url": news.get('imageUrl'), "published_at": news.get('pubTime')})
+                res_news_save = self.safe_request("POST", f"{self.base_url}/media_news", headers=self.headers, json={"id": news.get('newsId'), "title": news.get('title'), "content": news.get('content'), "source": news.get('source'), "image_url": news.get('imageUrl'), "published_at": news.get('pubTime')})
+                self.check_response(f"خبر رياضي: {news.get('title')[:30]}...", res_news_save)
 
     def pipeline_4_matches_stats_and_lineups(self):
         logging.info("⚡ [PIPELINE 4] ضخ مباريات اليوم الحية + التشكيلات التكتيكية...")
@@ -184,7 +198,9 @@ class DSTWR_The_Absolute_Monster_Engine:
                     goals = item.get('goals', {})
                     match_id = f.get('id')
                     
-                    self.safe_request("POST", f"{self.base_url}/matches", headers=self.headers, json={"id": match_id, "league_id": lg["af_id"], "home_team_id": teams.get('home', {}).get('id'), "away_team_id": teams.get('away', {}).get('id'), "match_date": f.get('date').split('T')[0], "match_time": f.get('date').split('T')[1][:5], "status": f.get('status', {}).get('short'), "referee": f.get('referee', 'Unknown Referee'), "venue_id": f.get('venue', {}).get('id')})
+                    res_m = self.safe_request("POST", f"{self.base_url}/matches", headers=self.headers, json={"id": match_id, "league_id": lg["af_id"], "home_team_id": teams.get('home', {}).get('id'), "away_team_id": teams.get('away', {}).get('id'), "match_date": f.get('date').split('T')[0], "match_time": f.get('date').split('T')[1][:5], "status": f.get('status', {}).get('short'), "referee": f.get('referee', 'Unknown Referee'), "venue_id": f.get('venue', {}).get('id')})
+                    self.check_response(f"مباراة يوم اليوم ID: {match_id}", res_m)
+                    
                     self.safe_request("POST", f"{self.base_url}/match_results", headers=self.headers, json={"match_id": match_id, "home_score": goals.get('home'), "away_score": goals.get('away')})
                     
                     url_lu = "https://api-football-v1.p.rapidapi.com/v3/fixtures/lineups"
@@ -213,10 +229,10 @@ class DSTWR_The_Absolute_Monster_Engine:
                                 "fouls": s_maps.get('Fouls', 0),
                                 "corners": s_maps.get('Corner Kicks', 0)
                             })
-                time.sleep(1.5)
+                time.sleep(0.5)
 
     def run_engine(self):
-        logging.info("🚀 [LAUNCH] إطلاق المحرك النفاث الذكي لملء جداول السوبربيز!")
+        logging.info("🚀 [LAUNCH] إطلاق المحرك النفاث الذكي لملء جداول السوبربيز بأقصى سرعة!")
         self.pipeline_0_generate_seasons()
         self.pipeline_1_leagues_teams_and_stats()
         self.pipeline_2_deep_archive()
@@ -226,3 +242,4 @@ class DSTWR_The_Absolute_Monster_Engine:
 
 if __name__ == "__main__":
     DSTWR_The_Absolute_Monster_Engine().run_engine()
+        
