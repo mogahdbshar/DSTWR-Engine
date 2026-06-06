@@ -9,7 +9,7 @@ import sys
 sys.stdout.reconfigure(line_buffering=True)
 
 print("="*70, flush=True)
-print("🏆 الأرشيف الشامل لكرة القدم - كل المصادر مرة واحدة", flush=True)
+print("🏆 الأرشيف الشامل لكرة القدم - تشخيص الأخطاء", flush=True)
 print("="*70, flush=True)
 
 SUPABASE_URL = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1"
@@ -25,193 +25,93 @@ headers = {
     "Content-Type": "application/json"
 }
 
-def upsert_to_supabase(table, data_list):
-    if not data_list:
-        return 0
-    inserted = 0
-    for i in range(0, len(data_list), 50):
-        batch = data_list[i:i+50]
-        try:
-            h = headers.copy()
-            h["Prefer"] = "resolution=merge-duplicates,return=minimal"
-            resp = requests.post(f"{SUPABASE_URL}/{table}", headers=h, json=batch, timeout=30)
-            if resp.status_code in [200, 201]:
-                inserted += len(batch)
-                print(f"   ✅ رفع {len(batch)} إلى {table}", flush=True)
-        except Exception as e:
-            print(f"   ❌ خطأ: {str(e)[:50]}", flush=True)
-        time.sleep(0.1)
-    return inserted
+# إحصائيات الأخطاء
+errors = []
+success_count = 0
 
-# ========== كل المباريات من كل المصادر ==========
-all_matches = []
-all_teams = set()
-
-# 1. jokecamp/FootballData - EPL من 2015 إلى 2019
-print("\n📥 [1/6] EPL (jokecamp)...", flush=True)
-for year in range(2015, 2020):
-    url = f"https://raw.githubusercontent.com/jokecamp/FootballData/master/data/EPL/{year}-{year+1}/{year}-{year+1}_PL_Results.csv"
+def test_url(url, description):
+    global success_count
     try:
+        print(f"\n🔍 اختبار: {description}", flush=True)
+        print(f"   📍 الرابط: {url}", flush=True)
         resp = requests.get(url, timeout=15)
+        print(f"   📊 حالة HTTP: {resp.status_code}", flush=True)
         if resp.status_code == 200:
-            lines = resp.text.strip().split('\n')
-            for line in lines[1:]:
-                parts = line.split(',')
-                if len(parts) >= 5:
-                    mid = hashlib.md5(f"{parts[0]}_{parts[1]}_{parts[2]}".encode()).hexdigest()
-                    all_matches.append({
-                        "id": mid, "date": parts[0],
-                        "home_team": parts[1], "away_team": parts[2],
-                        "home_score": int(parts[3]) if parts[3].isdigit() else None,
-                        "away_score": int(parts[4]) if parts[4].isdigit() else None,
-                        "league": "EPL", "season": year
-                    })
-                    all_teams.add(parts[1]); all_teams.add(parts[2])
-            print(f"   ✅ {year}-{year+1}: {len(lines)-1} مباراة", flush=True)
-    except: pass
-    time.sleep(0.3)
+            content = resp.text
+            lines = content.strip().split('\n')
+            print(f"   ✅ نجاح: {len(lines)} سطر", flush=True)
+            success_count += 1
+            return resp
+        else:
+            print(f"   ❌ فشل: HTTP {resp.status_code}", flush=True)
+            errors.append(f"{description}: HTTP {resp.status_code}")
+            return None
+    except requests.exceptions.Timeout:
+        print(f"   ❌ وقت الاستجابة انتهى (Timeout)", flush=True)
+        errors.append(f"{description}: Timeout")
+    except requests.exceptions.ConnectionError:
+        print(f"   ❌ خطأ في الاتصال (Connection Error)", flush=True)
+        errors.append(f"{description}: Connection Error")
+    except Exception as e:
+        print(f"   ❌ خطأ غير متوقع: {str(e)[:100]}", flush=True)
+        errors.append(f"{description}: {str(e)[:50]}")
+    return None
 
-# 2. كأس العالم (2010-2026)
-print("\n📥 [2/6] كأس العالم...", flush=True)
-for year in [2010, 2014, 2018, 2022, 2026]:
-    url = f"https://raw.githubusercontent.com/openfootball/worldcup.json/master/{year}/worldcup.json"
-    try:
-        resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
-            count = 0
-            for r in data.get("rounds", []):
-                for m in r.get("matches", []):
-                    count += 1
-                    mid = f"wc_{year}_{m.get('num', count)}"
-                    all_matches.append({
-                        "id": mid, "date": m.get("date"),
-                        "home_team": m.get("team1", {}).get("name"),
-                        "away_team": m.get("team2", {}).get("name"),
-                        "home_score": m.get("score1"), "away_score": m.get("score2"),
-                        "league": f"World Cup {year}", "season": year,
-                        "stadium": m.get("stadium")
-                    })
-                    all_teams.add(m.get("team1", {}).get("name"))
-                    all_teams.add(m.get("team2", {}).get("name"))
-            print(f"   ✅ {year}: {count} مباراة", flush=True)
-    except: pass
-    time.sleep(0.3)
-
-# 3. engsoccerdata (تاريخ إنجلترا)
-print("\n📥 [3/6] التاريخ الإنجليزي (1888-2016)...", flush=True)
-try:
-    resp = requests.get("https://raw.githubusercontent.com/jalapic/engsoccerdata/master/data-raw/engsoccerdata2.csv", timeout=30)
-    if resp.status_code == 200:
-        lines = resp.text.strip().split('\n')
-        for line in lines[1:5000]:
-            parts = line.split(',')
-            if len(parts) >= 6:
-                mid = hashlib.md5(f"{parts[0]}_{parts[2]}_{parts[3]}_{parts[1]}".encode()).hexdigest()
-                all_matches.append({
-                    "id": mid, "date": parts[0], "season": parts[1],
-                    "home_team": parts[2], "away_team": parts[3],
-                    "home_score": int(parts[4]) if parts[4].isdigit() else None,
-                    "away_score": int(parts[5]) if parts[5].isdigit() else None,
-                    "league": "England", "tier": parts[6] if len(parts) > 6 else None
-                })
-                all_teams.add(parts[2]); all_teams.add(parts[3])
-        print(f"   ✅ {len(lines)-1} مباراة تاريخية", flush=True)
-except: pass
-
-# 4. La Liga (الدوري الإسباني)
-print("\n📥 [4/6] La Liga...", flush=True)
-for year in range(2015, 2020):
-    url = f"https://raw.githubusercontent.com/jokecamp/FootballData/master/data/La_Liga/{year}-{year+1}/{year}-{year+1}_La_Liga.csv"
-    try:
-        resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
-            lines = resp.text.strip().split('\n')
-            for line in lines[1:]:
-                parts = line.split(',')
-                if len(parts) >= 5:
-                    mid = hashlib.md5(f"laliga_{parts[0]}_{parts[1]}_{parts[2]}".encode()).hexdigest()
-                    all_matches.append({
-                        "id": mid, "date": parts[0],
-                        "home_team": parts[1], "away_team": parts[2],
-                        "home_score": int(parts[3]) if parts[3].isdigit() else None,
-                        "away_score": int(parts[4]) if parts[4].isdigit() else None,
-                        "league": "La Liga", "season": year
-                    })
-                    all_teams.add(parts[1]); all_teams.add(parts[2])
-            print(f"   ✅ {year}-{year+1}: {len(lines)-1} مباراة", flush=True)
-    except: pass
-    time.sleep(0.3)
-
-# 5. Bundesliga (الدوري الألماني)
-print("\n📥 [5/6] Bundesliga...", flush=True)
-for year in range(2015, 2020):
-    url = f"https://raw.githubusercontent.com/jokecamp/FootballData/master/data/Bundesliga/{year}-{year+1}/{year}-{year+1}_Bundesliga.csv"
-    try:
-        resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
-            lines = resp.text.strip().split('\n')
-            for line in lines[1:]:
-                parts = line.split(',')
-                if len(parts) >= 5:
-                    mid = hashlib.md5(f"bundesliga_{parts[0]}_{parts[1]}_{parts[2]}".encode()).hexdigest()
-                    all_matches.append({
-                        "id": mid, "date": parts[0],
-                        "home_team": parts[1], "away_team": parts[2],
-                        "home_score": int(parts[3]) if parts[3].isdigit() else None,
-                        "away_score": int(parts[4]) if parts[4].isdigit() else None,
-                        "league": "Bundesliga", "season": year
-                    })
-                    all_teams.add(parts[1]); all_teams.add(parts[2])
-            print(f"   ✅ {year}-{year+1}: {len(lines)-1} مباراة", flush=True)
-    except: pass
-    time.sleep(0.3)
-
-# 6. Serie A (الدوري الإيطالي)
-print("\n📥 [6/6] Serie A...", flush=True)
-for year in range(2015, 2020):
-    url = f"https://raw.githubusercontent.com/jokecamp/FootballData/master/data/Serie_A/{year}-{year+1}/{year}-{year+1}_Serie_A.csv"
-    try:
-        resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
-            lines = resp.text.strip().split('\n')
-            for line in lines[1:]:
-                parts = line.split(',')
-                if len(parts) >= 5:
-                    mid = hashlib.md5(f"seriea_{parts[0]}_{parts[1]}_{parts[2]}".encode()).hexdigest()
-                    all_matches.append({
-                        "id": mid, "date": parts[0],
-                        "home_team": parts[1], "away_team": parts[2],
-                        "home_score": int(parts[3]) if parts[3].isdigit() else None,
-                        "away_score": int(parts[4]) if parts[4].isdigit() else None,
-                        "league": "Serie A", "season": year
-                    })
-                    all_teams.add(parts[1]); all_teams.add(parts[2])
-            print(f"   ✅ {year}-{year+1}: {len(lines)-1} مباراة", flush=True)
-    except: pass
-    time.sleep(0.3)
-
-# ========== الرفع إلى Supabase ==========
 print("\n" + "="*70, flush=True)
-print("📤 رفع البيانات إلى Supabase...", flush=True)
+print("📡 اختبار جميع المصادر:")
 print("="*70, flush=True)
 
-# رفع المباريات
-if all_matches:
-    count = upsert_to_supabase("matches", all_matches)
-    print(f"\n✅ تم رفع {count} مباراة", flush=True)
+# ========== اختبار جميع الروابط ==========
 
-# رفع الفرق
-if all_teams:
-    teams_list = [{"id": hashlib.md5(t.encode()).hexdigest(), "name": t} for t in all_teams]
-    count = upsert_to_supabase("teams", teams_list)
-    print(f"✅ تم رفع {count} فريق", flush=True)
+# 1. jokecamp EPL
+test_url("https://raw.githubusercontent.com/jokecamp/FootballData/master/data/EPL/2015-16/2015-16_PL_Results.csv", "EPL 2015-16")
 
-# ========== النتيجة النهائية ==========
+# 2. كأس العالم
+test_url("https://raw.githubusercontent.com/openfootball/worldcup.json/master/2018/worldcup.json", "كأس العالم 2018")
+
+# 3. engsoccerdata
+test_url("https://raw.githubusercontent.com/jalapic/engsoccerdata/master/data-raw/engsoccerdata2.csv", "البيانات التاريخية إنجلترا")
+
+# 4. La Liga
+test_url("https://raw.githubusercontent.com/jokecamp/FootballData/master/data/La_Liga/2015-16/2015-16_La_Liga.csv", "La Liga 2015-16")
+
+# 5. Bundesliga
+test_url("https://raw.githubusercontent.com/jokecamp/FootballData/master/data/Bundesliga/2015-16/2015-16_Bundesliga.csv", "Bundesliga 2015-16")
+
+# 6. Serie A
+test_url("https://raw.githubusercontent.com/jokecamp/FootballData/master/data/Serie_A/2015-16/2015-16_Serie_A.csv", "Serie A 2015-16")
+
+# 7. روابط بديلة لكأس العالم
+test_url("https://raw.githubusercontent.com/openfootball/worldcup.json/master/2022/worldcup.json", "كأس العالم 2022")
+
+# 8. مصدر بديل للدوريات
+test_url("https://raw.githubusercontent.com/openfootball/football.json/master/data/2015/en.1.json", "Premier League (openfootball)")
+
+# ========== تقرير الأخطاء ==========
 print("\n" + "="*70, flush=True)
-print("🏆 اكتمل الأرشيف!", flush=True)
+print("📊 تقرير التشخيص:")
 print("="*70, flush=True)
-print(f"📊 إجمالي المباريات: {len(all_matches)}")
-print(f"📊 إجمالي الفرق: {len(all_teams)}")
-print("✅ جميع البيانات في Supabase")
+print(f"✅ المصادر الناجحة: {success_count}/8")
+print(f"❌ المصادر الفاشلة: {len(errors)}/8")
+
+if errors:
+    print("\n🔴 تفاصيل الأخطاء:")
+    for i, err in enumerate(errors, 1):
+        print(f"   {i}. {err}")
+
+print("\n" + "="*70, flush=True)
+print("🔍 تحليل المشكلة:")
+print("="*70, flush=True)
+
+if success_count == 0:
+    print("❌ جميع المصادر فشلت!")
+    print("   الأسباب المحتملة:")
+    print("   1. GitHub raw URLs تغيرت أو حذفت")
+    print("   2. المستودعات تغير هيكلها")
+    print("   3. GitHub يحظر الطلبات من GitHub Actions?")
+    print("\n💡 الحل المقترح:")
+    print("   البحث عن مصادر جديدة محدثة")
+else:
+    print(f"✅ {success_count} مصدر شغال. نقدر نكمل معهم.")
+
 print("="*70, flush=True)
