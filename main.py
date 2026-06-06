@@ -3,100 +3,165 @@ import requests
 import time
 from loguru import logger
 
+# إعداد الطباعة بشكل نظيف
 logger.add(lambda msg: print(msg, end=""), format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}", level="INFO")
 
-class DSTWR_Mega_Database_Engine:
+class DSTWR_Universal_Engine:
     def __init__(self):
-        # جمع كل المفاتيح من الـ Environment Variables الممررة من جيت هاب
-        self.api_key = os.getenv("API_FOOTBALL_KEY")
+        # جلب جميع المفاتيح اللي عندك حرفياً من البيئة
+        self.api_football_key = os.getenv("API_FOOTBALL_KEY")
+        self.sportmonks_key = os.getenv("SPORTMONKS_KEY")
+        self.football_data_key = os.getenv("FOOTBALL_DATA_KEY")
+        self.isports_key = os.getenv("ISPORTS_KEY")
+        
+        # إعدادات سوبربيز الثابتة
         self.sup_key = os.getenv("SUPABASE_KEY")
         self.sup_url = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1/players"
-        
         self.headers_sup = {
             "apikey": self.sup_key,
             "Authorization": f"Bearer {self.sup_key}",
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates"
         }
+
+    def upload_to_supabase(self, players_list):
+        """دالة موحدة لرفع أي قائمة لاعبين إلى سوبربيز"""
+        if not players_list:
+            return
         
-        # قائمة أقوى الدوريات لجلب قاعدة بيانات ضخمة
-        self.leagues = {
-            39: "الدوري الإنجليزي الممتاز",
-            140: "الدوري الإسباني (La Liga)",
-            135: "الدوري الإيطالي (Serie A)",
-            78: "الدوري الألماني (Bundesliga)",
-            61: "الدوري الفرنسي (Ligue 1)"
-        }
-        self.season = 2025 # الموسم الأكثر استقراراً للبيانات الكاملة
+        logger.info(f"📦 جاري تحضير دفعة من {len(players_list)} لاعب للرفع إلى Supabase...")
+        try:
+            res = requests.post(self.sup_url, headers=self.headers_sup, json=players_list, timeout=30)
+            if res.status_code in [200, 201]:
+                logger.info(f"✅ نجح الرفع! تم تحديث/إضافة {len(players_list)} لاعب بنجاح.")
+            else:
+                logger.error(f"❌ فشل الرفع لسوبربيز | كود: {res.status_code} | الرد: {res.text}")
+        except Exception as e:
+            logger.error(f"❌ خطأ أثناء الرفع: {e}")
 
-    def sync_api_football(self):
-        if not self.api_key:
-            logger.warning("⚠️ مفتاح API_FOOTBALL_KEY غير متوفر في البيئة حالياً.")
+    def try_sportmonks(self):
+        """المحرك الأول: Sportmonks API v3"""
+        if not self.sportmonks_key:
             return False
+        
+        logger.info("📡 [محرك Sportmonks] جاري محاولة جلب اللاعبين...")
+        # طلب مسار اللاعبين الرسمي لـ Sportmonks v3
+        url = f"https://api.sportmonks.com/v3/football/players?api_token={self.sportmonks_key}"
+        try:
+            res = requests.get(url, timeout=30)
+            if res.status_code == 200:
+                data = res.json().get('data', [])
+                logger.info(f"🎉 نجح اتصال Sportmonks! وجدنا {len(data)} لاعب.")
+                
+                payload = []
+                for p in data:
+                    payload.append({
+                        "id": p.get('id'),
+                        "name": p.get('display_name') or p.get('name', 'Unknown'),
+                        "firstname": p.get('firstname'),
+                        "lastname": p.get('lastname'),
+                        "nationality": p.get('nationality', {}).get('name') if isinstance(p.get('nationality'), dict) else None,
+                        "photo": p.get('image_path'),
+                        "league_name": "Sportmonks Data"
+                    })
+                self.upload_to_supabase(payload)
+                return True
+            else:
+                logger.warning(f"⚠️ مفتاح Sportmonks رد بكود: {res.status_code}")
+        except Exception as e:
+            logger.error(f"❌ خطأ محرك Sportmonks: {e}")
+        return False
 
-        logger.info("🔥 [DSTWR] تم تفعيل محرك API-Football المحدث... جاري سحب الدوريات صفحة صفحة.")
-        total_uploaded = 0
-        headers_api = {"x-apisports-key": self.api_key}
+    def try_api_football(self):
+        """المحرك الثاني: API-Football (RapidAPI/Api-Sports)"""
+        if not self.api_football_key:
+            return False
+            
+        logger.info("📡 [محرك API-Football] جاري محاولة الجلب الدوري الإنجليزي 2025...")
+        url = "https://v3.football.api-sports.io/players?league=39&season=2025&page=1"
+        headers = {"x-apisports-key": self.api_football_key}
+        
+        try:
+            res = requests.get(url, headers=headers, timeout=30)
+            json_data = res.json()
+            
+            if json_data.get('response'):
+                results = json_data['response']
+                logger.info(f"🎉 نجح اتصال API-Football! وجدنا {len(results)} لاعب.")
+                
+                payload = []
+                for item in results:
+                    p = item.get('player', {})
+                    st = item.get('statistics', [{}])[0]
+                    payload.append({
+                        "id": p.get('id'),
+                        "name": p.get('name'),
+                        "firstname": p.get('firstname'),
+                        "lastname": p.get('lastname'),
+                        "age": p.get('age'),
+                        "nationality": p.get('nationality'),
+                        "photo": p.get('photo'),
+                        "team_name": st.get('team', {}).get('name'),
+                        "league_name": "Premier League"
+                    })
+                self.upload_to_supabase(payload)
+                return True
+            else:
+                logger.warning(f"⚠️ مفتاح API-Football لم يرجع بيانات أو به خطأ: {json_data.get('errors')}")
+        except Exception as e:
+            logger.error(f"❌ خطأ محرك API-Football: {e}")
+        return False
 
-        for league_id, league_name in self.leagues.items():
-            logger.info(f"🏟️ جاري جلب: {league_name}")
-            page = 1
-            while True:
-                url = f"https://v3.football.api-sports.io/players?league={league_id}&season={self.season}&page={page}"
-                try:
-                    res = requests.get(url, headers=headers_api, timeout=30)
-                    json_data = res.json()
-                    
-                    if "errors" in json_data and json_data["errors"]:
-                        if "token" in json_data["errors"]:
-                            logger.error(f"❌ خطأ بالمفتاح: {json_data['errors']['token']}")
-                            return False
-
-                    results = json_data.get('response', [])
-                    if not results:
-                        logger.info(f"✨ انتهت صفحات {league_name}.")
-                        break
-
-                    batch_payload = []
-                    for item in results:
-                        player = item.get('player', {})
-                        stats = item.get('statistics', [{}])[0]
-                        batch_payload.append({
-                            "id": player.get('id'),
-                            "name": player.get('name', 'Unknown'),
-                            "firstname": player.get('firstname'),
-                            "lastname": player.get('lastname'),
-                            "age": player.get('age'),
-                            "nationality": player.get('nationality'),
-                            "photo": player.get('photo'),
-                            "team_name": stats.get('team', {}).get('name'),
-                            "league_name": league_name
+    def try_football_data(self):
+        """المحرك الثالث: Football-Data.org"""
+        if not self.football_data_key:
+            return False
+            
+        logger.info("📡 [محرك Football-Data] جاري محاولة جلب الفرق واللاعبين...")
+        url = "https://api.football-data.org/v4/competitions/PL/teams" # الدوري الانجليزي كمثال
+        headers = {"X-Auth-Token": self.football_data_key}
+        
+        try:
+            res = requests.get(url, headers=headers, timeout=30)
+            if res.status_code == 200:
+                teams = res.json().get('teams', [])
+                logger.info(f"🎉 نجح اتصال Football-Data! جاري سحب لاعبي الفرق...")
+                
+                payload = []
+                for team in teams[:3]: # نأخذ أول 3 فرق لتفادي الـ Rate Limit
+                    squad = team.get('squad', [])
+                    for p in squad:
+                        payload.append({
+                            "id": p.get('id'),
+                            "name": p.get('name'),
+                            "team_name": team.get('name'),
+                            "league_name": "Premier League (FD)"
                         })
+                self.upload_to_supabase(payload)
+                return True
+            else:
+                logger.warning(f"⚠️ مفتاح Football-Data رد بكود: {res.status_code}")
+        except Exception as e:
+            logger.error(f"❌ خطأ محرك Football-Data: {e}")
+        return False
 
-                    if batch_payload:
-                        sup_res = requests.post(self.sup_url, headers=self.headers_sup, json=batch_payload, timeout=30)
-                        if sup_res.status_code in [200, 201]:
-                            total_uploaded += len(batch_payload)
-                            logger.info(f"✅ تم رفع {len(batch_payload)} لاعب إلى Supabase.")
-                        else:
-                            logger.error(f"❌ خطأ سوبربيز: {sup_res.text}")
-
-                    page += 1
-                    time.sleep(1) # تجنب الحظر
-
-                except Exception as e:
-                    logger.error(f"❌ خطأ أثناء التشغيل: {e}")
-                    break
-
-        logger.info(f"🏁 اكتمل الرفع الشامل! إجمالي اللاعبين المضافين: {total_uploaded}")
-        return True
-
-    def run(self):
-        logger.info("🚀 إطلاق المحرك الشامل الضخم لإصطياد المفاتيح الناجحة...")
-        # تشغيل محرك سحب البيانات الرئيسي
-        success = self.sync_api_football()
-        if not success:
-            logger.error("❌ فشل تشغيل المحرك الرئيسي بسبب إعدادات المفتاح بالـ YAML. يرجى تعديل الـ YAML كما هو موضح.")
+    def start_engine(self):
+        logger.info("🚀 [DSTWR] تم إطلاق المحرك الشامل لفحص واصطياد المفاتيح الشغالة...")
+        
+        # تجربة المحركات واحد تلو الآخر، أول واحد ينجح ويجيب بيانات بيوقف الباقي عشان ما نخلص الكوتا
+        if self.try_sportmonks():
+            logger.info("🏁 تمت العملية بنجاح عبر محرك Sportmonks.")
+            return
+            
+        if self.try_api_football():
+            logger.info("🏁 تمت العملية بنجاح عبر محرك API-Football.")
+            return
+            
+        if self.try_football_data():
+            logger.info("🏁 تمت العملية بنجاح عبر محرك Football-Data.")
+            return
+            
+        logger.error("❌ انتهت المحاولات! كل المفاتيح اللي أرسلتها واجهت مشاكل في الروابط أو الصلاحيات.")
 
 if __name__ == "__main__":
-    DSTWR_Mega_Database_Engine().run()
+    DSTWR_Universal_Engine().start_engine()
