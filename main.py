@@ -1,15 +1,13 @@
 import os
 import requests
-import hashlib
-import time
-import sys
 import json
+import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("="*70, flush=True)
-print("🏆 أرشيف كرة القدم - متوافق مع هيكل Supabase", flush=True)
-print("="*70, flush=True)
+print("="*80, flush=True)
+print("📊 تقرير شامل عن بيانات Supabase", flush=True)
+print("="*80, flush=True)
 
 SUPABASE_URL = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1"
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -24,151 +22,81 @@ headers = {
     "Content-Type": "application/json"
 }
 
-# ========== 1. جلب هيكل جميع الجداول ==========
-print("\n📋 [1/4] جلب هيكل الجداول من Supabase...", flush=True)
-
-tables = ["matches", "teams", "players", "stadiums", "coaches", "transfers"]
-table_schemas = {}
-
-for table in tables:
-    print(f"   🔍 جدول: {table}", flush=True)
-    try:
-        # نجيب سجل واحد عشان نشوف الأعمدة
-        resp = requests.get(f"{SUPABASE_URL}/{table}?limit=1", headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data:
-                columns = list(data[0].keys())
-                table_schemas[table] = columns
-                print(f"      ✅ الأعمدة: {', '.join(columns[:5])}{'...' if len(columns) > 5 else ''}", flush=True)
-            else:
-                # الجدول فاضي، نجرب نضيف سجل تجريبي؟
-                print(f"      ⚠️ الجدول فاضي - سنستخدم الهيكل الافتراضي", flush=True)
-                table_schemas[table] = ["id", "name", "created_at"]  # افتراضي
-        else:
-            print(f"      ❌ فشل: {resp.status_code}", flush=True)
-            table_schemas[table] = ["id", "name"]  # افتراضي
-    except Exception as e:
-        print(f"      ❌ خطأ: {str(e)[:50]}", flush=True)
-        table_schemas[table] = ["id", "name"]  # افتراضي
-    time.sleep(0.2)
-
-# ========== 2. عرض الهيكل المستخدم ==========
-print("\n📊 [2/4] الهيكل المعتمد:", flush=True)
-for table, cols in table_schemas.items():
-    print(f"   📁 {table}: {len(cols)} عمود", flush=True)
-
-# ========== 3. جلب البيانات ==========
-print("\n📥 [3/4] جلب البيانات من المصادر...", flush=True)
-
-all_matches = []
-all_teams = set()
-
-# EPL data
-urls = [
-    ("https://www.football-data.co.uk/mmz4281/2425/E0.csv", "2024-25"),
-    ("https://www.football-data.co.uk/mmz4281/2324/E0.csv", "2023-24"),
+# قائمة جميع الجداول (من اللي شفناها في حسابك)
+TABLES = [
+    "teams", "players", "matches", "stadiums", "coaches", 
+    "match_events", "match_stats", "match_lineups", "transfers",
+    "player_injuries", "media_news", "league_standings", "leagues"
 ]
 
-for url, season in urls:
-    print(f"   📥 EPL {season}...", flush=True)
+report = {}
+
+print("\n🔍 جلب معلومات الجداول...\n", flush=True)
+
+for table in TABLES:
+    print(f"📁 جدول: {table}", flush=True)
+    
+    # 1. جلب عدد السجلات
     try:
-        resp = requests.get(url, timeout=20)
+        resp = requests.get(f"{SUPABASE_URL}/{table}?select=id&limit=0", headers=headers)
         if resp.status_code == 200:
-            lines = resp.text.strip().split('\n')
-            for line in lines[1:]:
-                parts = line.split(',')
-                if len(parts) >= 6:
-                    home_score = parts[4].strip()
-                    away_score = parts[5].strip()
-                    
-                    # بناء الكائن حسب الهيكل الموجود
-                    match_obj = {}
-                    if "id" in table_schemas.get("matches", []):
-                        match_obj["id"] = hashlib.md5(f"{season}_{parts[2]}_{parts[3]}_{parts[0]}".encode()).hexdigest()
-                    if "date" in table_schemas.get("matches", []):
-                        match_obj["date"] = parts[0].strip()
-                    if "home_team" in table_schemas.get("matches", []):
-                        match_obj["home_team"] = parts[2].strip()
-                    if "away_team" in table_schemas.get("matches", []):
-                        match_obj["away_team"] = parts[3].strip()
-                    if "home_score" in table_schemas.get("matches", []):
-                        match_obj["home_score"] = int(home_score) if home_score.isdigit() else 0
-                    if "away_score" in table_schemas.get("matches", []):
-                        match_obj["away_score"] = int(away_score) if away_score.isdigit() else 0
-                    if "league" in table_schemas.get("matches", []):
-                        match_obj["league"] = "Premier League"
-                    if "season" in table_schemas.get("matches", []):
-                        match_obj["season"] = season
-                    
-                    all_matches.append(match_obj)
-                    all_teams.add(parts[2].strip())
-                    all_teams.add(parts[3].strip())
-            print(f"      ✅ {len(lines)-1} مباراة", flush=True)
-    except Exception as e:
-        print(f"      ❌ خطأ: {str(e)[:50]}", flush=True)
-
-# ========== 4. رفع البيانات ==========
-print("\n📤 [4/4] رفع البيانات إلى Supabase...", flush=True)
-
-def upsert_data(table, data_list):
-    if not data_list:
-        print(f"   ⚠️ لا توجد بيانات لـ {table}", flush=True)
-        return 0
-    
-    inserted = 0
-    total = len(data_list)
-    print(f"   📤 رفع {total} سجل إلى {table}...", flush=True)
-    
-    for i, item in enumerate(data_list):
-        try:
-            # استخدام upsert مع تجاهل التكرار
-            resp = requests.post(f"{SUPABASE_URL}/{table}", headers=headers, json=item, timeout=10)
-            if resp.status_code in [200, 201]:
-                inserted += 1
-            elif resp.status_code == 409:
-                inserted += 1  # مكرر، نعتبره نجاح
+            # نحتاج نجيب العدد الفعلي
+            count_resp = requests.get(f"{SUPABASE_URL}/{table}?select=id", headers=headers)
+            if count_resp.status_code == 200:
+                count = len(count_resp.json())
+                print(f"   📊 عدد السجلات: {count}", flush=True)
             else:
-                if i < 5:  # نطبع أول 5 أخطاء فقط
-                    print(f"      ⚠️ فشل سجل {i+1}: {resp.status_code}", flush=True)
+                count = 0
+                print(f"   📊 عدد السجلات: 0", flush=True)
+        else:
+            count = 0
+            print(f"   📊 عدد السجلات: 0 (HTTP {resp.status_code})", flush=True)
+    except Exception as e:
+        count = 0
+        print(f"   ❌ خطأ في الجدول: {str(e)[:50]}", flush=True)
+    
+    # 2. جلب عينة من البيانات (أول 3 سجلات)
+    if count > 0:
+        try:
+            sample_resp = requests.get(f"{SUPABASE_URL}/{table}?limit=3", headers=headers)
+            if sample_resp.status_code == 200:
+                samples = sample_resp.json()
+                print(f"   📋 عينة (أول {len(samples)} سجل):", flush=True)
+                for idx, sample in enumerate(samples):
+                    # عرض المفتاح الأساسي وبعض الحقول المهمة
+                    sample_info = {}
+                    for key in list(sample.keys())[:5]:  # أول 5 أعمدة فقط
+                        val = sample[key]
+                        if isinstance(val, str) and len(val) > 30:
+                            val = val[:27] + "..."
+                        sample_info[key] = val
+                    print(f"      سجل {idx+1}: {json.dumps(sample_info, ensure_ascii=False)}", flush=True)
         except Exception as e:
-            if i < 5:
-                print(f"      ❌ خطأ في سجل {i+1}: {str(e)[:50]}", flush=True)
-        
-        if (i + 1) % 100 == 0:
-            print(f"      ✅ تم رفع {i+1}/{total}", flush=True)
-        time.sleep(0.02)
+            print(f"   ⚠️ خطأ في جلب العينة: {str(e)[:50]}", flush=True)
+    else:
+        print(f"   📋 الجدول فاضي (لا توجد بيانات)", flush=True)
     
-    print(f"   ✅ تم رفع {inserted}/{total} إلى {table}", flush=True)
-    return inserted
+    print("", flush=True)  # سطر فارغ
+    report[table] = {"count": count}
 
-# رفع المباريات
-if all_matches:
-    match_count = upsert_data("matches", all_matches)
+# ========== ملخص ==========
+print("="*80, flush=True)
+print("📊 ملخص عام:", flush=True)
+print("="*80, flush=True)
+
+total_records = 0
+for table, data in report.items():
+    total_records += data["count"]
+    if data["count"] > 0:
+        print(f"   ✅ {table}: {data['count']} سجل", flush=True)
+
+print(f"\n📊 إجمالي السجلات في قاعدة البيانات: {total_records}", flush=True)
+
+if total_records == 0:
+    print("\n⚠️ قاعدة البيانات فاضية تماماً!", flush=True)
+    print("   سنبدأ من الصفر ببناء الهيكل الموحد.", flush=True)
 else:
-    match_count = 0
+    print("\n💡 نصيحة: البيانات الموجودة حالياً غير مترابطة بشكل كامل.", flush=True)
+    print("   نقترح توحيد الهيكل وإعادة البيانات بشكل منظم.", flush=True)
 
-# رفع الفرق
-if all_teams:
-    teams_list = []
-    for team in all_teams:
-        team_obj = {}
-        if "id" in table_schemas.get("teams", []):
-            team_obj["id"] = hashlib.md5(team.encode()).hexdigest()
-        if "name" in table_schemas.get("teams", []):
-            team_obj["name"] = team
-        if "source" in table_schemas.get("teams", []):
-            team_obj["source"] = "football-data.co.uk"
-        teams_list.append(team_obj)
-    
-    team_count = upsert_data("teams", teams_list)
-else:
-    team_count = 0
-
-# ========== النتيجة النهائية ==========
-print("\n" + "="*70, flush=True)
-print("🏆 اكتمل!", flush=True)
-print("="*70, flush=True)
-print(f"📊 المباريات المرفوعة: {match_count}")
-print(f"📊 الفرق المرفوعة: {team_count}")
-print("="*70, flush=True)
+print("="*80, flush=True)
