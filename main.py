@@ -3,13 +3,20 @@ import requests
 import hashlib
 import time
 import sys
-import csv
+import pandas as pd
 import io
+
+# تثبيت pandas إذا لم يكن موجوداً (للمرة الأولى فقط)
+try:
+    import pandas as pd
+except ImportError:
+    os.system('pip install pandas')
+    import pandas as pd
 
 sys.stdout.reconfigure(line_buffering=True)
 
 print("="*80, flush=True)
-print("🏆 رفع المباريات - تصحيح مشكلة التاريخ", flush=True)
+print("🏆 رفع المباريات - النسخة النهائية (باستخدام Pandas)", flush=True)
 print("="*80, flush=True)
 
 SUPABASE_URL = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1"
@@ -34,104 +41,103 @@ if resp.status_code == 200:
         teams[team["name"]] = team["id"]
 print(f"   ✅ {len(teams)} فريق", flush=True)
 
-# ========== جلب المباريات بشكل صحيح ==========
+# ========== جلب المباريات باستخدام Pandas ==========
 print("\n📥 جلب المباريات من المصادر...", flush=True)
 
 all_matches = []
-seasons = [
-    ("https://www.football-data.co.uk/mmz4281/1516/E0.csv", "2015-16"),
-    ("https://www.football-data.co.uk/mmz4281/1617/E0.csv", "2016-17"),
-    ("https://www.football-data.co.uk/mmz4281/1718/E0.csv", "2017-18"),
-    ("https://www.football-data.co.uk/mmz4281/1819/E0.csv", "2018-19"),
-    ("https://www.football-data.co.uk/mmz4281/1920/E0.csv", "2019-20"),
-    ("https://www.football-data.co.uk/mmz4281/2021/E0.csv", "2020-21"),
-    ("https://www.football-data.co.uk/mmz4281/2122/E0.csv", "2021-22"),
-    ("https://www.football-data.co.uk/mmz4281/2223/E0.csv", "2022-23"),
-    ("https://www.football-data.co.uk/mmz4281/2324/E0.csv", "2023-24"),
-    ("https://www.football-data.co.uk/mmz4281/2425/E0.csv", "2024-25"),
-    ("https://www.football-data.co.uk/mmz4281/2526/E0.csv", "2025-26"),
+seasons_urls = [
+    ("1516", "2015-16"),
+    ("1617", "2016-17"),
+    ("1718", "2017-18"),
+    ("1819", "2018-19"),
+    ("1920", "2019-20"),
+    ("2021", "2020-21"),
+    ("2122", "2021-22"),
+    ("2223", "2022-23"),
+    ("2324", "2023-24"),
+    ("2425", "2024-25"),
+    ("2526", "2025-26"),
 ]
 
-for url, season in seasons:
+for code, season in seasons_urls:
+    url = f"https://www.football-data.co.uk/mmz4281/{code}/E0.csv"
     print(f"   📥 موسم {season}...", flush=True)
+    
     try:
-        resp = requests.get(url, timeout=30)
-        if resp.status_code == 200:
-            # استخدام csv reader لقراءة الملف بشكل صحيح
-            content = resp.text
-            csv_reader = csv.reader(io.StringIO(content))
-            header = next(csv_reader)  # تخطي الهيدر
+        # استخدام pandas لقراءة CSV مباشرة
+        df = pd.read_csv(url)
+        
+        # تجاهل الصفوف الفارغة
+        df = df.dropna(subset=['Date', 'HomeTeam', 'AwayTeam'])
+        
+        match_count = 0
+        for _, row in df.iterrows():
+            match_date = str(row['Date']).strip()
+            home_team = str(row['HomeTeam']).strip()
+            away_team = str(row['AwayTeam']).strip()
+            home_score = row['FTHG'] if pd.notna(row['FTHG']) else 0
+            away_score = row['FTAG'] if pd.notna(row['FTAG']) else 0
             
-            match_count = 0
-            for row in csv_reader:
-                if len(row) < 6:
-                    continue
-                
-                # التأكد من أن التاريخ هو تاريخ وليس نصاً عشوائياً
-                match_date = row[0].strip()
-                if not match_date or match_date.startswith('Date') or not match_date[0].isdigit():
-                    continue
-                
-                home_team = row[2].strip()
-                away_team = row[3].strip()
-                home_score = row[4].strip()
-                away_score = row[5].strip()
-                
-                home_id = teams.get(home_team)
-                away_id = teams.get(away_team)
-                
-                if home_id and away_id and home_score.isdigit() and away_score.isdigit():
-                    match_id = hashlib.md5(f"{season}_{home_team}_{away_team}_{match_date}".encode()).hexdigest()
-                    all_matches.append({
-                        "id": match_id,
-                        "league_id": 2021,
-                        "season": season,
-                        "home_team_id": home_id,
-                        "away_team_id": away_id,
-                        "home_score": int(home_score),
-                        "away_score": int(away_score),
-                        "match_date": match_date,
-                        "status": "finished",
-                        "season_year": int(season.split('-')[1]) + 2000 if '-' in season else 2025
-                    })
-                    match_count += 1
+            # التحقق من صحة التاريخ
+            if not match_date or len(match_date) < 8:
+                continue
             
-            print(f"      ✅ {match_count} مباراة صالحة", flush=True)
-        else:
-            print(f"      ⚠️ HTTP {resp.status_code}", flush=True)
+            home_id = teams.get(home_team)
+            away_id = teams.get(away_team)
+            
+            if home_id and away_id:
+                match_id = hashlib.md5(f"{season}_{home_team}_{away_team}_{match_date}".encode()).hexdigest()
+                all_matches.append({
+                    "id": match_id,
+                    "league_id": 2021,
+                    "season": season,
+                    "home_team_id": home_id,
+                    "away_team_id": away_id,
+                    "home_score": int(home_score) if pd.notna(home_score) else 0,
+                    "away_score": int(away_score) if pd.notna(away_score) else 0,
+                    "match_date": match_date,
+                    "status": "finished",
+                    "season_year": int(season.split('-')[1]) + 2000
+                })
+                match_count += 1
+        
+        print(f"      ✅ {match_count} مباراة صالحة", flush=True)
+        
     except Exception as e:
-        print(f"      ❌ خطأ: {str(e)[:50]}", flush=True)
+        print(f"      ❌ خطأ في تحميل {season}: {str(e)[:100]}", flush=True)
+    
     time.sleep(0.5)
 
-print(f"\n   📊 إجمالي المباريات الصالحة للرفع: {len(all_matches)}", flush=True)
+print(f"\n   📊 إجمالي المباريات الصالحة: {len(all_matches)}", flush=True)
 
 # ========== رفع المباريات ==========
-print("\n📤 رفع المباريات إلى Supabase...", flush=True)
-
-if not all_matches:
-    print("   ⚠️ لا توجد مباريات صالحة للرفع!", flush=True)
-    sys.exit(0)
-
-uploaded = 0
-headers_upsert = headers.copy()
-headers_upsert["Prefer"] = "resolution=merge-duplicates"
-
-# رفع على دفعات صغيرة (50 مباراة لكل دفعة)
-for i in range(0, len(all_matches), 50):
-    batch = all_matches[i:i+50]
-    try:
-        resp = requests.post(f"{SUPABASE_URL}/matches", headers=headers_upsert, json=batch, timeout=30)
-        if resp.status_code in [200, 201]:
-            uploaded += len(batch)
-            print(f"   ✅ دفعة {i//50 + 1}/{(len(all_matches)+49)//50}: تم رفع {len(batch)} مباراة", flush=True)
-        else:
-            print(f"   ❌ فشل الدفعة {i//50 + 1}: {resp.status_code}", flush=True)
-            print(f"      السبب: {resp.text[:100]}", flush=True)
-    except Exception as e:
-        print(f"   ❌ خطأ في الدفعة {i//50 + 1}: {str(e)}", flush=True)
-    time.sleep(0.2)
-
-print(f"\n   ✅ تم رفع {uploaded}/{len(all_matches)} مباراة", flush=True)
+if all_matches:
+    print("\n📤 رفع المباريات إلى Supabase...", flush=True)
+    
+    uploaded = 0
+    headers_upsert = headers.copy()
+    headers_upsert["Prefer"] = "resolution=merge-duplicates"
+    
+    # رفع على دفعات صغيرة
+    batch_size = 50
+    for i in range(0, len(all_matches), batch_size):
+        batch = all_matches[i:i+batch_size]
+        try:
+            resp = requests.post(f"{SUPABASE_URL}/matches", headers=headers_upsert, json=batch, timeout=30)
+            if resp.status_code in [200, 201]:
+                uploaded += len(batch)
+                print(f"   ✅ دفعة {i//batch_size + 1}/{(len(all_matches)+batch_size-1)//batch_size}: تم رفع {len(batch)} مباراة", flush=True)
+            else:
+                print(f"   ❌ فشل الدفعة {i//batch_size + 1}: {resp.status_code}", flush=True)
+                if "duplicate" in resp.text.lower():
+                    print(f"      ⚠️ تكرار في البيانات", flush=True)
+        except Exception as e:
+            print(f"   ❌ خطأ: {str(e)}", flush=True)
+        time.sleep(0.2)
+    
+    print(f"\n   ✅ تم رفع {uploaded}/{len(all_matches)} مباراة", flush=True)
+else:
+    print("\n⚠️ لا توجد مباريات صالحة للرفع!", flush=True)
 
 # ========== النتيجة ==========
 print("\n" + "="*80, flush=True)
