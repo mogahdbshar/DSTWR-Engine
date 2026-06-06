@@ -12,15 +12,19 @@ jobs:
 
       - name: Set up Python
         uses: actions/setup-python@v4
+        id: setup-python # تعريف الـ ID هنا ضروري
         with:
           python-version: '3.9'
-          # تأكد أن الكاش يعمل بناءً على ملف المتطلبات
           cache: 'pip' 
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # إضافة شرط التأكد: إذا كان الكاش موجوداً، لن يستغرق هذا الأمر وقتاً
           pip install -r requirements.txt
-        # هذا الجزء يضمن عدم تكرار التثبيت بلا داعٍ
-        if: steps.cache-pip.outputs.cache-hit != 'true'
+
+      - name: Run Final Engine
+        run: python main.py
+        env:
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          SPORTMONKS_KEY: ${{ secrets.SPORTMONKS_KEY }}
