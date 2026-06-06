@@ -7,7 +7,7 @@ import sys
 sys.stdout.reconfigure(line_buffering=True)
 
 print("="*80, flush=True)
-print("🏆 رفع المباريات - النسخة النهائية", flush=True)
+print("🏆 رفع المباريات - حل نهائي", flush=True)
 print("="*80, flush=True)
 
 SUPABASE_URL = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1"
@@ -24,7 +24,7 @@ headers = {
 }
 
 # ========== جلب الفرق ==========
-print("\n📥 جلب الفرق الموجودة...", flush=True)
+print("\n📥 جلب الفرق...", flush=True)
 resp = requests.get(f"{SUPABASE_URL}/teams?select=id,name", headers=headers)
 teams = {}
 if resp.status_code == 200:
@@ -33,7 +33,7 @@ if resp.status_code == 200:
 print(f"   ✅ {len(teams)} فريق", flush=True)
 
 # ========== جلب المباريات ==========
-print("\n📥 جلب المباريات من المصادر...", flush=True)
+print("\n📥 جلب المباريات...", flush=True)
 
 all_matches = []
 seasons = [
@@ -82,7 +82,7 @@ for url, season in seasons:
                         "away_score": int(away_score) if away_score.isdigit() else 0,
                         "match_date": match_date,
                         "status": "finished",
-                        "season_year": int(season.split('-')[1]) + 2000 if '-' in season else 2025
+                        "season_year": int(season.split('-')[1]) + 2000
                     })
             print(f"      ✅ {len(lines)-1} مباراة", flush=True)
     except Exception as e:
@@ -91,23 +91,27 @@ for url, season in seasons:
 
 print(f"\n   📊 إجمالي المباريات: {len(all_matches)}", flush=True)
 
-# ========== رفع المباريات ==========
-print("\n📤 رفع المباريات إلى Supabase...", flush=True)
+# ========== رفع المباريات باستخدام upsert ==========
+print("\n📤 رفع المباريات (upsert)...", flush=True)
 
 uploaded = 0
-for i, match in enumerate(all_matches):
+headers_upsert = headers.copy()
+headers_upsert["Prefer"] = "resolution=merge-duplicates"
+
+for i in range(0, len(all_matches), 100):
+    batch = all_matches[i:i+100]
     try:
-        resp = requests.post(f"{SUPABASE_URL}/matches", headers=headers, json=match, timeout=10)
+        # استخدام upsert لتجنب التكرار
+        resp = requests.post(f"{SUPABASE_URL}/matches", headers=headers_upsert, json=batch, timeout=30)
         if resp.status_code in [200, 201]:
-            uploaded += 1
-        elif resp.status_code == 409:
-            uploaded += 1
-    except:
-        pass
-    
-    if (i + 1) % 200 == 0:
-        print(f"   ✅ تم رفع {i+1}/{len(all_matches)} (نجاح: {uploaded})", flush=True)
-    time.sleep(0.02)
+            uploaded += len(batch)
+            print(f"   ✅ رفع دفعة {i//100 + 1}/{(len(all_matches)+99)//100} ({len(batch)} مباراة)", flush=True)
+        else:
+            print(f"   ❌ فشل الدفعة {i//100 + 1}: {resp.status_code}", flush=True)
+            print(f"      السبب: {resp.text[:200]}", flush=True)
+    except Exception as e:
+        print(f"   ❌ خطأ في الدفعة {i//100 + 1}: {str(e)}", flush=True)
+    time.sleep(0.5)
 
 print(f"\n   ✅ تم رفع {uploaded}/{len(all_matches)} مباراة", flush=True)
 
