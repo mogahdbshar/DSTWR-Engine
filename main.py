@@ -1,63 +1,51 @@
 import os
 import requests
-import logging
 from loguru import logger
 
-# إعداد Loguru
-logger.add(lambda msg: print(msg, end=""), format="{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}", level="INFO")
-
-class DSTWR_Sync_Engine:
+class DSTWR_Multi_Engine:
     def __init__(self):
-        self.monks_key = os.getenv("SPORTMONKS_KEY")
-        self.sup_key = os.getenv("SUPABASE_KEY")
+        # قاموس يربط المفاتيح بالروابط الصحيحة لكل مزود
+        self.providers = {
+            "SPORTMONKS": {
+                "key": os.getenv("SPORTMONKS_KEY"),
+                "url": "https://api.sportmonks.com/v3/football/players"
+            },
+            "API_FOOTBALL": {
+                "key": os.getenv("API_FOOTBALL_KEY"),
+                "url": "https://v3.football.api-sports.io/players"
+            }
+        }
         self.sup_url = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1/players"
-        
-        # تصحيح الخطأ: تم إصلاح الـ f-string هنا
         self.sup_headers = {
-            "apikey": self.sup_key,
-            "Authorization": f"Bearer {self.sup_key}",
+            "apikey": os.getenv("SUPABASE_KEY"),
+            "Authorization": f"Bearer {os.getenv('SUPABASE_KEY')}",
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates"
         }
 
-    def push_to_supabase(self, player_data):
-        try:
-            response = requests.post(self.sup_url, headers=self.sup_headers, json=player_data, timeout=10)
-            
-            if response.status_code in [200, 201]:
-                logger.info(f"✅ تم بنجاح: {player_data.get('name')}")
-            else:
-                # هذه الرسالة ستكشف لنا لماذا يرفض سوبربيز البيانات (كود 400)
-                logger.error(f"❌ فشل رفع {player_data.get('name')} | الكود: {response.status_code} | الرسالة: {response.text}")
-                
-        except Exception as e:
-            logger.error(f"❌ خطأ في الاتصال بسوبربيز: {e}")
+    def fetch_data(self):
+        # نبدأ بـ API-Football (لأنه الأكثر شيوعاً)
+        provider = self.providers["API_FOOTBALL"]
+        headers = {"x-apisports-key": provider["key"]}
+        params = {"league": 39, "season": 2025} # الدوري الإنجليزي كمثال
+        
+        logger.info(f"🚀 محاولة الاتصال بـ API-Football...")
+        res = requests.get(provider["url"], headers=headers, params=params)
+        
+        if res.status_code == 200:
+            logger.info("✅ نجح الاتصال بـ API-Football!")
+            return res.json().get('response', [])
+        else:
+            logger.error(f"❌ فشل الاتصال بـ API-Football | الكود: {res.status_code} | الرسالة: {res.text}")
+            return []
 
     def run(self):
-        logger.info("🚀 بدء تشغيل المحرك بعد تصحيح الأخطاء...")
-        url = f"https://api.sportmonks.com/v3/football/players?api_token={self.monks_key}&include=team;country;position"
-        
-        try:
-            res = requests.get(url, timeout=20)
-            if res.status_code != 200:
-                logger.error(f"❌ فشل الاتصال بـ Sportmonks | الكود: {res.status_code}")
-                return
-
-            players = res.json().get('data', [])
-            logger.info(f"🔍 تم استلام {len(players)} لاعب.")
-
-            for p in players:
-                # نرسل البيانات الأساسية المطابقة للجدول
-                payload = {
-                    "id": p['id'],
-                    "name": p.get('display_name', 'Unknown')
-                    # ملاحظة: إذا استمر خطأ 400، سنعرف السبب من رسالة الخطأ في الـ Log
-                }
-                self.push_to_supabase(payload)
-                
-        except Exception as e:
-            logger.error(f"❌ خطأ عام: {e}")
+        data = self.fetch_data()
+        for item in data[:5]: # رفع تجريبي
+            player = item.get('player', {})
+            payload = {"id": player.get('id'), "name": player.get('name')}
+            requests.post(self.sup_url, headers=self.sup_headers, json=payload)
+            logger.info(f"✅ تم معالجة: {payload['name']}")
 
 if __name__ == "__main__":
-    engine = DSTWR_Sync_Engine()
-    engine.run()
+    DSTWR_Multi_Engine().run()
