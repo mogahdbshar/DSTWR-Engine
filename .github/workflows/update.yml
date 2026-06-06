@@ -12,10 +12,9 @@ jobs:
 
       - name: Set up Python
         uses: actions/setup-python@v4
-        id: setup-python
         with:
           python-version: '3.9'
-          cache: 'pip' # الكاش مفعّل هنا تلقائياً بذكاء من جيت هاب
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -25,10 +24,9 @@ jobs:
       - name: Run Ultra Engine
         run: python main.py
         env:
-          # تمرير كل المفاتيح إجبارياً للسكربت لقراءة البيانات وصناعة القاعدة الضخمة
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SPORTMONKS_KEY: ${{ secrets.SPORTMONKS_KEY }}
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
-          ISPORTS_KEY: ${{ secrets.ISPORTS_KEY }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          ISPORTS_KEY: ${{ secrets.ISPORTS_KEY }}
+          SPORTMONKS_KEY: ${{ secrets.SPORTMONKS_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
