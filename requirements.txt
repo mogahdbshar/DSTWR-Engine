@@ -1,0 +1,8 @@
+requests
+requests-cache
+tqdm
+beautifulsoup4
+lxml
+tenacity
+loguru
+python-dotenv
