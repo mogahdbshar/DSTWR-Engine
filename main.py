@@ -1,56 +1,64 @@
 import os
 import requests
 import logging
+from loguru import logger
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s')
+# إعداد Loguru لتتبع احترافي
+logger.add(lambda msg: print(msg, end=""), format="{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}", level="INFO")
 
-class DSTWR_Diagnostic_Engine:
+class DSTWR_Sync_Engine:
     def __init__(self):
         self.monks_key = os.getenv("SPORTMONKS_KEY")
+        # تأكد أن هذا الرابط هو رابط الـ API الخاص بجدولك في سوبربيز
         self.sup_url = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1/players"
         self.sup_headers = {
             "apikey": os.getenv("SUPABASE_KEY"),
-            "Authorization": f"Bearer {os.getenv('SUPABASE_KEY')}",
+            "Authorization": f"Bearer {os.getenv("SUPABASE_KEY")}",
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates"
         }
 
-    def run_diagnosis(self):
-        logging.info("🚀 بدء فحص اتصال Sportmonks...")
-        # نستخدم رابط عام للبيانات
-        url = f"https://api.sportmonks.com/v3/football/players?api_token={self.monks_key}"
+    def push_to_supabase(self, player_data):
+        try:
+            response = requests.post(self.sup_url, headers=self.sup_headers, json=player_data, timeout=10)
+            
+            if response.status_code in [200, 201]:
+                logger.info(f"✅ تم بنجاح: {player_data.get('name')}")
+            else:
+                # هنا ستظهر رسالة الخطأ الحقيقية من سوبربيز التي نحتاجها للتشخيص
+                logger.error(f"❌ فشل رفع {player_data.get('name')} | الكود: {response.status_code} | الرسالة: {response.text}")
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في الاتصال بسوبربيز: {e}")
+
+    def run(self):
+        logger.info("🚀 بدء تشغيل المحرك الشامل للبيانات...")
+        url = f"https://api.sportmonks.com/v3/football/players?api_token={self.monks_key}&include=team;country;position"
         
         try:
             res = requests.get(url, timeout=20)
-            logging.info(f"🔍 [الاستجابة] كود الحالة: {res.status_code}")
-            
-            data_json = res.json()
-            
-            # طباعة هيكل الرد لمعرفة أين تقع البيانات
-            logging.info(f"🔍 [هيكل البيانات] مفاتيح الرد: {list(data_json.keys())}")
-            
-            if 'data' in data_json:
-                data = data_json['data']
-                logging.info(f"🔍 [الكمية] عدد اللاعبين الموجودين: {len(data)}")
-                
-                if len(data) > 0:
-                    logging.info(f"✅ أول لاعب هو: {data[0].get('display_name')}")
-                    # محاولة رفع أول لاعب
-                    player = data[0]
-                    payload = {
-                        "id": player['id'],
-                        "name": player.get('display_name', 'Unknown'),
-                        "age": player.get('age', 0)
-                    }
-                    upload = requests.post(self.sup_url, headers=self.sup_headers, json=payload)
-                    logging.info(f"📤 [رفع] نتيجة محاولة رفع أول لاعب: {upload.status_code}")
-                else:
-                    logging.warning("⚠️ الرد يحتوي على قائمة فارغة!")
-            else:
-                logging.error(f"❌ لم يتم العثور على مفتاح 'data' في الرد. الرد الكامل: {data_json}")
+            if res.status_code != 200:
+                logger.error(f"❌ فشل الاتصال بـ Sportmonks | الكود: {res.status_code}")
+                return
+
+            players = res.json().get('data', [])
+            logger.info(f"🔍 تم استلام {len(players)} لاعب من المصدر.")
+
+            for p in players:
+                # نرسل البيانات الأساسية (تأكد أن أسماء المفاتيح تطابق أعمدة الجدول في سوبربيز)
+                payload = {
+                    "id": p['id'],
+                    "name": p.get('display_name', 'Unknown'),
+                    "age": p.get('age'),
+                    "nationality": p.get('country', {}).get('name') if p.get('country') else None,
+                    "team_name": p.get('team', {}).get('name') if p.get('team') else None,
+                    "position": p.get('position', {}).get('name') if p.get('position') else None
+                }
+                self.push_to_supabase(payload)
                 
         except Exception as e:
-            logging.error(f"❌ خطأ في الاتصال: {e}")
+            logger.error(f"❌ خطأ عام: {e}")
 
 if __name__ == "__main__":
-    DSTWR_Diagnostic_Engine().run_diagnosis()
+    engine = DSTWR_Sync_Engine()
+    engine.run()
