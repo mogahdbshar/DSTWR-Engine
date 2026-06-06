@@ -4,19 +4,11 @@ import hashlib
 import time
 import sys
 import pandas as pd
-import io
-
-# تثبيت pandas إذا لم يكن موجوداً (للمرة الأولى فقط)
-try:
-    import pandas as pd
-except ImportError:
-    os.system('pip install pandas')
-    import pandas as pd
 
 sys.stdout.reconfigure(line_buffering=True)
 
 print("="*80, flush=True)
-print("🏆 رفع المباريات - النسخة النهائية (باستخدام Pandas)", flush=True)
+print("🏆 الحل النهائي - التحقق والرفع", flush=True)
 print("="*80, flush=True)
 
 SUPABASE_URL = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1"
@@ -32,8 +24,51 @@ headers = {
     "Content-Type": "application/json"
 }
 
-# ========== جلب الفرق ==========
-print("\n📥 جلب الفرق الموجودة...", flush=True)
+# ========== 1. التحقق من وجود الدوري ==========
+print("\n🔍 [1/4] التحقق من جدول leagues...", flush=True)
+
+# جلب جميع الدوريات
+resp = requests.get(f"{SUPABASE_URL}/leagues", headers=headers)
+leagues = {}
+if resp.status_code == 200:
+    for league in resp.json():
+        leagues[league["id"]] = league["name"]
+    print(f"   ✅ الدوريات الموجودة: {len(leagues)}")
+    
+    # البحث عن الدوري الإنجليزي
+    premier_league_id = None
+    for lid, name in leagues.items():
+        if "Premier" in name or "premier" in name:
+            premier_league_id = lid
+            print(f"   🏆 تم العثور على الدوري الإنجليزي: ID {lid} - {name}")
+            break
+    
+    if not premier_league_id:
+        print("   ❌ لم يتم العثور على الدوري الإنجليزي!")
+        print("   سيتم إنشاؤه...")
+        
+        # إنشاء الدوري الإنجليزي
+        new_league = {
+            "id": 2021,
+            "name": "Premier League",
+            "name_ar": "الدوري الإنجليزي الممتاز",
+            "country": "England",
+            "country_ar": "إنجلترا",
+            "code": "PL"
+        }
+        resp = requests.post(f"{SUPABASE_URL}/leagues", headers=headers, json=new_league)
+        if resp.status_code in [200, 201]:
+            premier_league_id = 2021
+            print(f"   ✅ تم إنشاء الدوري الإنجليزي برقم {premier_league_id}")
+        else:
+            print(f"   ❌ فشل إنشاء الدوري: {resp.text}")
+            sys.exit(1)
+else:
+    print(f"   ❌ فشل جلب الدوريات: {resp.status_code}")
+    sys.exit(1)
+
+# ========== 2. جلب الفرق ==========
+print("\n🏟️ [2/4] جلب الفرق الموجودة...", flush=True)
 resp = requests.get(f"{SUPABASE_URL}/teams?select=id,name", headers=headers)
 teams = {}
 if resp.status_code == 200:
@@ -41,8 +76,8 @@ if resp.status_code == 200:
         teams[team["name"]] = team["id"]
 print(f"   ✅ {len(teams)} فريق", flush=True)
 
-# ========== جلب المباريات باستخدام Pandas ==========
-print("\n📥 جلب المباريات من المصادر...", flush=True)
+# ========== 3. جلب المباريات باستخدام Pandas ==========
+print("\n📥 [3/4] جلب المباريات من المصادر...", flush=True)
 
 all_matches = []
 seasons_urls = [
@@ -64,10 +99,7 @@ for code, season in seasons_urls:
     print(f"   📥 موسم {season}...", flush=True)
     
     try:
-        # استخدام pandas لقراءة CSV مباشرة
         df = pd.read_csv(url)
-        
-        # تجاهل الصفوف الفارغة
         df = df.dropna(subset=['Date', 'HomeTeam', 'AwayTeam'])
         
         match_count = 0
@@ -78,7 +110,6 @@ for code, season in seasons_urls:
             home_score = row['FTHG'] if pd.notna(row['FTHG']) else 0
             away_score = row['FTAG'] if pd.notna(row['FTAG']) else 0
             
-            # التحقق من صحة التاريخ
             if not match_date or len(match_date) < 8:
                 continue
             
@@ -89,12 +120,12 @@ for code, season in seasons_urls:
                 match_id = hashlib.md5(f"{season}_{home_team}_{away_team}_{match_date}".encode()).hexdigest()
                 all_matches.append({
                     "id": match_id,
-                    "league_id": 2021,
+                    "league_id": premier_league_id,
                     "season": season,
                     "home_team_id": home_id,
                     "away_team_id": away_id,
-                    "home_score": int(home_score) if pd.notna(home_score) else 0,
-                    "away_score": int(away_score) if pd.notna(away_score) else 0,
+                    "home_score": int(home_score),
+                    "away_score": int(away_score),
                     "match_date": match_date,
                     "status": "finished",
                     "season_year": int(season.split('-')[1]) + 2000
@@ -104,47 +135,61 @@ for code, season in seasons_urls:
         print(f"      ✅ {match_count} مباراة صالحة", flush=True)
         
     except Exception as e:
-        print(f"      ❌ خطأ في تحميل {season}: {str(e)[:100]}", flush=True)
+        print(f"      ❌ خطأ: {str(e)[:100]}", flush=True)
     
     time.sleep(0.5)
 
 print(f"\n   📊 إجمالي المباريات الصالحة: {len(all_matches)}", flush=True)
 
-# ========== رفع المباريات ==========
-if all_matches:
-    print("\n📤 رفع المباريات إلى Supabase...", flush=True)
-    
-    uploaded = 0
-    headers_upsert = headers.copy()
-    headers_upsert["Prefer"] = "resolution=merge-duplicates"
-    
-    # رفع على دفعات صغيرة
-    batch_size = 50
-    for i in range(0, len(all_matches), batch_size):
-        batch = all_matches[i:i+batch_size]
-        try:
-            resp = requests.post(f"{SUPABASE_URL}/matches", headers=headers_upsert, json=batch, timeout=30)
-            if resp.status_code in [200, 201]:
-                uploaded += len(batch)
-                print(f"   ✅ دفعة {i//batch_size + 1}/{(len(all_matches)+batch_size-1)//batch_size}: تم رفع {len(batch)} مباراة", flush=True)
-            else:
-                print(f"   ❌ فشل الدفعة {i//batch_size + 1}: {resp.status_code}", flush=True)
-                if "duplicate" in resp.text.lower():
-                    print(f"      ⚠️ تكرار في البيانات", flush=True)
-        except Exception as e:
-            print(f"   ❌ خطأ: {str(e)}", flush=True)
-        time.sleep(0.2)
-    
-    print(f"\n   ✅ تم رفع {uploaded}/{len(all_matches)} مباراة", flush=True)
-else:
-    print("\n⚠️ لا توجد مباريات صالحة للرفع!", flush=True)
+# ========== 4. رفع المباريات (سجل سجل) ==========
+print("\n📤 [4/4] رفع المباريات إلى Supabase (سجل سجل)...", flush=True)
 
-# ========== النتيجة ==========
+if not all_matches:
+    print("   ⚠️ لا توجد مباريات للرفع!", flush=True)
+    sys.exit(0)
+
+uploaded = 0
+failed_count = 0
+
+for i, match in enumerate(all_matches):
+    try:
+        # التحقق من وجود المباراة
+        check_resp = requests.get(f"{SUPABASE_URL}/matches?id=eq.{match['id']}", headers=headers)
+        if check_resp.status_code == 200 and check_resp.json():
+            uploaded += 1
+            continue
+        
+        # رفع المباراة
+        resp = requests.post(f"{SUPABASE_URL}/matches", headers=headers, json=match, timeout=10)
+        if resp.status_code in [200, 201]:
+            uploaded += 1
+        elif resp.status_code == 409:
+            uploaded += 1
+        else:
+            failed_count += 1
+            if failed_count <= 5:  # طباعة أول 5 أخطاء فقط
+                print(f"   ❌ فشل رفع مباراة {i+1}: {resp.status_code}", flush=True)
+                print(f"      السبب: {resp.text[:100]}", flush=True)
+    
+    except Exception as e:
+        failed_count += 1
+        if failed_count <= 5:
+            print(f"   ❌ خطأ في المباراة {i+1}: {str(e)}", flush=True)
+    
+    if (i + 1) % 200 == 0:
+        print(f"   ✅ تم رفع {i+1}/{len(all_matches)} (نجاح: {uploaded})", flush=True)
+    
+    time.sleep(0.05)
+
+print(f"\n   ✅ تم رفع {uploaded}/{len(all_matches)} مباراة بنجاح", flush=True)
+print(f"   ❌ فشل {failed_count} مباراة", flush=True)
+
+# ========== النتيجة النهائية ==========
 print("\n" + "="*80, flush=True)
 print("🏆 اكتمل!", flush=True)
 print("="*80, flush=True)
 
 resp = requests.get(f"{SUPABASE_URL}/matches?select=id", headers=headers)
 matches_total = len(resp.json()) if resp.status_code == 200 else 0
-print(f"📊 المباريات في Supabase: {matches_total}")
+print(f"📊 إجمالي المباريات في Supabase: {matches_total}")
 print("="*80, flush=True)
