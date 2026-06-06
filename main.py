@@ -27,7 +27,7 @@ class DSTWR_Master_Engine:
     def push(self, source, table, item_id, data, label):
         if item_id in self.cache: return
         try:
-            res = requests.post(f"{self.sup_url}/{table}", headers=self.sup_headers, json=data, timeout=5)
+            res = requests.post(f"{self.sup_url}/{table}", headers=self.sup_headers, json=data, timeout=10)
             if res.status_code in [200, 201]:
                 logging.info(f"✅ [{source}] | {table} | تم رفع: {label}")
                 self.cache.add(item_id)
@@ -37,47 +37,54 @@ class DSTWR_Master_Engine:
         except Exception as e:
             logging.error(f"❌ خطأ في {source}: {e}")
 
-    # 1. API-Football (المصدر الرئيسي)
+    # 1. API-Football: جلب شامل للفرق واللاعبين
     def task_football_api(self):
         headers = {"X-RapidAPI-Key": self.keys["football"], "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
-        res = requests.get("https://api-football-v1.p.rapidapi.com/v3/teams", headers=headers, params={"league": 39, "season": 2025})
-        if res.status_code == 200:
-            for t in res.json().get('response', []):
-                self.push("API-Football", "teams", t['team']['id'], {"id": t['team']['id'], "name": t['team']['name']}, t['team']['name'])
+        for league in [39, 140, 135]: # يمكنك إضافة المزيد
+            res = requests.get(f"https://api-football-v1.p.rapidapi.com/v3/players", headers=headers, params={"league": league, "season": 2025, "page": 1})
+            if res.status_code == 200:
+                for p in res.json().get('response', []):
+                    info = p['player']
+                    self.push("API-Football", "players", info['id'], {
+                        "id": info['id'], "name": info['name'], "age": info['age'], 
+                        "nationality": info['nationality'], "image_url": info['photo']
+                    }, info['name'])
 
-    # 2. Football-Data (الترتيب)
-    def task_football_data(self):
-        headers = {"X-Auth-Token": self.keys["data"]}
-        res = requests.get("https://api.football-data.org/v4/competitions/PL/standings", headers=headers)
-        if res.status_code == 200:
-            for s in res.json().get('standings', [])[0].get('table', []):
-                team = s['team']
-                self.push("Football-Data", "league_standings", team['id'], {"team_id": team['id'], "name": team['name'], "points": s['points']}, team['name'])
-
-    # 3. Sportmonks (بيانات عميقة)
+    # 2. Sportmonks: نظام الصفحات الشامل (أضخم قاعدة بيانات)
     def task_sportmonks(self):
-        res = requests.get(f"https://api.sportmonks.com/v3/football/players?api_token={self.keys['monks']}")
-        if res.status_code == 200:
-            for p in res.json().get('data', []):
-                self.push("Sportmonks", "players", p['id'], {"id": p['id'], "name": p['display_name']}, p['display_name'])
+        for page in range(1, 100): # سيسحب حتى 100 صفحة
+            url = f"https://api.sportmonks.com/v3/football/players?api_token={self.keys['monks']}&page={page}&include=team;country;position"
+            res = requests.get(url, timeout=15)
+            if res.status_code == 200:
+                data = res.json().get('data', [])
+                if not data: break
+                for p in data:
+                    self.push("Sportmonks", "players", p['id'], {
+                        "id": p['id'], "name": p['display_name'], "age": p.get('age'),
+                        "nationality": p.get('country', {}).get('name'),
+                        "team_name": p.get('team', {}).get('name'),
+                        "image_url": p.get('image_path'), "position": p.get('position', {}).get('name')
+                    }, p['display_name'])
+                logging.info(f"📄 تمت معالجة صفحة Sportmonks رقم {page}")
+                time.sleep(0.5)
 
-    # 4. iSports (أخبار)
+    # 3. iSports: جلب أخبار شامل
     def task_isports(self):
         res = requests.get("http://api.isportsapi.com/sport/football/news", params={"api_key": self.keys["isports"]})
         if res.status_code == 200:
             for n in res.json().get('data', []):
-                self.push("iSports", "media_news", n['newsId'], {"id": n['newsId'], "title": n['title']}, n['title'][:15])
+                self.push("iSports", "media_news", n['newsId'], {"id": n['newsId'], "title": n['title'], "content": n['content']}, n['title'][:20])
 
     def run(self):
-        logging.info("🚀 بدء تشغيل المحرك الموحد بكامل المصادر...")
+        logging.info("🚀 بدء تشغيل محرك البيانات الضخمة (Big Data Engine)...")
         self.task_football_api()
-        self.task_football_data()
         self.task_sportmonks()
         self.task_isports()
         
         logging.info("------------------------------------------")
-        logging.info(f"📊 تقرير الأداء النهائي: تمت إضافة {self.stats['added']}، تخطي {self.stats['skipped']}")
-        logging.info("🏆 اكتملت المهمة بنجاح!")
+        logging.info(f"📊 التقرير النهائي: تمت إضافة {self.stats['added']}، تخطي {self.stats['skipped']}")
+        logging.info("🏆 انتهت المهمة بنجاح!")
 
 if __name__ == "__main__":
     DSTWR_Master_Engine().run()
+        
