@@ -1,71 +1,56 @@
 import os
 import requests
 import logging
-import time
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s')
 
-class DSTWR_Master_Engine:
+class DSTWR_Diagnostic_Engine:
     def __init__(self):
-        self.keys = {
-            "monks": os.getenv("SPORTMONKS_KEY"),
-            "supabase": os.getenv("SUPABASE_KEY")
-        }
-        self.sup_url = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1"
+        self.monks_key = os.getenv("SPORTMONKS_KEY")
+        self.sup_url = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1/players"
         self.sup_headers = {
-            "apikey": self.keys["supabase"],
-            "Authorization": f"Bearer {self.keys['supabase']}",
+            "apikey": os.getenv("SUPABASE_KEY"),
+            "Authorization": f"Bearer {os.getenv('SUPABASE_KEY')}",
             "Content-Type": "application/json",
-            "Prefer": "return=representation, resolution=merge-duplicates"
+            "Prefer": "resolution=merge-duplicates"
         }
-        self.stats = {"processed": 0}
 
-    def push(self, table, data):
-        """رفع وتحديث البيانات (Upsert)"""
+    def run_diagnosis(self):
+        logging.info("🚀 بدء فحص اتصال Sportmonks...")
+        # نستخدم رابط عام للبيانات
+        url = f"https://api.sportmonks.com/v3/football/players?api_token={self.monks_key}"
+        
         try:
-            # نرسل البيانات مباشرة، وسوبربيز تتعامل مع التحديث التلقائي
-            res = requests.post(f"{self.sup_url}/{table}", headers=self.sup_headers, json=data, timeout=10)
-            if res.status_code in [200, 201]:
-                self.stats["processed"] += 1
-                return True
-        except Exception as e:
-            logging.error(f"❌ خطأ: {e}")
-        return False
-
-    def task_sportmonks(self):
-        logging.info("⚽ بدء مزامنة البيانات (وضع التحديث التلقائي)...")
-        for page in range(1, 11): 
-            url = f"https://api.sportmonks.com/v3/football/players?api_token={self.keys['monks']}&page={page}&include=team;country;position"
-            try:
-                res = requests.get(url, timeout=15)
-                data = res.json().get('data', [])
+            res = requests.get(url, timeout=20)
+            logging.info(f"🔍 [الاستجابة] كود الحالة: {res.status_code}")
+            
+            data_json = res.json()
+            
+            # طباعة هيكل الرد لمعرفة أين تقع البيانات
+            logging.info(f"🔍 [هيكل البيانات] مفاتيح الرد: {list(data_json.keys())}")
+            
+            if 'data' in data_json:
+                data = data_json['data']
+                logging.info(f"🔍 [الكمية] عدد اللاعبين الموجودين: {len(data)}")
                 
-                if not data: break
-                
-                logging.info(f"🔍 [تتبع] معالجة الصفحة {page} - ({len(data)} لاعب)")
-                
-                for p in data:
-                    player_data = {
-                        "id": p['id'], 
-                        "name": p['display_name'], 
-                        "age": p.get('age'),
-                        "nationality": p.get('country', {}).get('name') if p.get('country') else "غير محدد",
-                        "team_name": p.get('team', {}).get('name') if p.get('team') else "بدون فريق",
-                        "image_url": p.get('image_path'), 
-                        "position": p.get('position', {}).get('name') if p.get('position') else "غير محدد"
+                if len(data) > 0:
+                    logging.info(f"✅ أول لاعب هو: {data[0].get('display_name')}")
+                    # محاولة رفع أول لاعب
+                    player = data[0]
+                    payload = {
+                        "id": player['id'],
+                        "name": player.get('display_name', 'Unknown'),
+                        "age": player.get('age', 0)
                     }
-                    self.push("players", player_data)
+                    upload = requests.post(self.sup_url, headers=self.sup_headers, json=payload)
+                    logging.info(f"📤 [رفع] نتيجة محاولة رفع أول لاعب: {upload.status_code}")
+                else:
+                    logging.warning("⚠️ الرد يحتوي على قائمة فارغة!")
+            else:
+                logging.error(f"❌ لم يتم العثور على مفتاح 'data' في الرد. الرد الكامل: {data_json}")
                 
-                time.sleep(0.5)
-            except Exception as e:
-                logging.error(f"❌ خطأ في الصفحة {page}: {e}")
-                break
-
-    def run(self):
-        logging.info("🚀 بدء تشغيل محرك المزامنة الذكي...")
-        self.task_sportmonks()
-        logging.info(f"📊 التقرير النهائي: تم معالجة {self.stats['processed']} سجل بنجاح.")
-        logging.info("🏆 اكتملت المهمة!")
+        except Exception as e:
+            logging.error(f"❌ خطأ في الاتصال: {e}")
 
 if __name__ == "__main__":
-    DSTWR_Master_Engine().run()
+    DSTWR_Diagnostic_Engine().run_diagnosis()
