@@ -14,19 +14,13 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-          cache: 'pip' # هذه الإضافة ستحفظ المكتبات وتجعل التنفيذ سريعاً جداً
+          # تأكد أن الكاش يعمل بناءً على ملف المتطلبات
+          cache: 'pip' 
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt # سيقوم بالتحميل مرة واحدة فقط
-
-      - name: Run Ultra Engine
-        run: python main.py
-        env:
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          ISPORTS_KEY: ${{ secrets.ISPORTS_KEY }}
-          SPORTMONKS_KEY: ${{ secrets.SPORTMONKS_KEY }}
-          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
-          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
-          
+          # إضافة شرط التأكد: إذا كان الكاش موجوداً، لن يستغرق هذا الأمر وقتاً
+          pip install -r requirements.txt
+        # هذا الجزء يضمن عدم تكرار التثبيت بلا داعٍ
+        if: steps.cache-pip.outputs.cache-hit != 'true'
