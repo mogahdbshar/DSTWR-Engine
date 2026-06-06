@@ -1,8 +1,7 @@
 import os
 import requests
 import hashlib
-import csv
-import io
+import json
 import time
 from datetime import datetime
 
@@ -16,17 +15,30 @@ HEADERS = {
     "Prefer": "resolution=merge-duplicates"
 }
 
-# ======================
-# ID ثابت عالمي
-# ======================
+# =========================
+# 🧠 أدوات النظام
+# =========================
+
+def log(msg):
+    print(f"🔹 {msg}", flush=True)
+
 def make_id(*args):
     raw = "_".join([str(a).strip().lower() for a in args if a])
     return hashlib.sha256(raw.encode()).hexdigest()
 
-# ======================
-# رفع قوي + Retry
-# ======================
-def push(table, data, retries=3):
+def safe_json(url):
+    try:
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
+        try:
+            return r.json()
+        except:
+            return json.loads(r.text)
+    except Exception as e:
+        log(f"فشل المصدر: {str(e)[:80]}")
+        return None
+
+def push(table, data):
     if not data:
         return 0
 
@@ -35,112 +47,181 @@ def push(table, data, retries=3):
     for i in range(0, len(data), 300):
         batch = data[i:i+300]
 
-        for attempt in range(retries):
-            try:
-                r = requests.post(
-                    f"{SUPABASE_URL}/{table}",
-                    headers=HEADERS,
-                    json=batch,
-                    timeout=40
-                )
+        try:
+            r = requests.post(
+                f"{SUPABASE_URL}/{table}",
+                headers=HEADERS,
+                json=batch,
+                timeout=40
+            )
 
-                if r.status_code in [200, 201]:
-                    success += len(batch)
-                    break
-                else:
-                    print(f"⚠️ {table} failed {r.status_code}")
+            if r.status_code in [200, 201]:
+                success += len(batch)
+                log(f"{table}: رفع {len(batch)} سجل")
+            else:
+                log(f"{table}: خطأ {r.status_code}")
 
-            except Exception as e:
-                print("❌ retry error:", str(e)[:80])
-                time.sleep(1)
+        except Exception as e:
+            log(f"خطأ رفع: {str(e)[:60]}")
 
         time.sleep(0.1)
 
-    print(f"✅ {table} inserted: {success}")
     return success
 
 
-# ======================
-# ENGINE
-# ======================
-class FootballDB:
+# =========================
+# 🏆 المحرك العالمي
+# =========================
 
-    def load_leagues_teams(self):
-        url = "https://raw.githubusercontent.com/openfootball/football.json/master/data/2023/en.1.json"
-        data = requests.get(url).json()
+class GlobalFootballEngine:
 
-        league_id = make_id("premier league", "england")
+    def run(self):
+        print("\n==============================")
+        print("🌍 تشغيل قاعدة بيانات كرة القدم العالمية")
+        print("==============================\n")
 
-        leagues = [{
-            "id": league_id,
-            "name": "Premier League",
-            "country": "England"
-        }]
+        teams = self.load_teams()
+        players = self.load_players()
+        matches = self.load_matches()
+        transfers = self.load_transfers()
 
-        teams = []
+        print("\n==============================")
+        print("🏁 انتهى بناء القاعدة العالمية")
+        print("==============================")
 
-        for t in data.get("teams", []):
-            teams.append({
-                "id": make_id(t.get("name"), "england"),
-                "name": t.get("name"),
-                "code": t.get("code"),
-                "league_id": league_id
-            })
+        log(f"الفرق: {len(teams)}")
+        log(f"اللاعبين: {len(players)}")
+        log(f"المباريات: {len(matches)}")
+        log(f"الانتقالات: {len(transfers)}")
 
-        push("leagues", leagues)
-        push("teams", teams)
+    # =========================
+    # الفرق (أوروبا + دوريات)
+    # =========================
+    def load_teams(self):
+        log("تحميل الفرق العالمية...")
 
-        return teams
+        leagues = [
+            "en.1", "es.1", "de.1", "it.1", "fr.1"
+        ]
 
+        all_teams = []
+
+        for lg in leagues:
+            url = f"https://raw.githubusercontent.com/openfootball/football.json/master/data/2023/{lg}.json"
+            data = safe_json(url)
+
+            if not data:
+                continue
+
+            league_id = make_id(lg)
+
+            for t in data.get("teams", []):
+                all_teams.append({
+                    "id": make_id(t.get("name"), lg),
+                    "name": t.get("name"),
+                    "code": t.get("code"),
+                    "league_id": league_id
+                })
+
+        push("teams", all_teams)
+        return all_teams
+
+    # =========================
+    # اللاعبين (عالمي)
+    # =========================
     def load_players(self):
-        url = "https://www.thesportsdb.com/api/v1/json/3/searchplayers.php?t=Arsenal"
-        data = requests.get(url).json()
+        log("تحميل اللاعبين العالميين...")
+
+        url = "https://www.thesportsdb.com/api/v1/json/3/searchplayers.php?p="
+        data = safe_json(url)
 
         players = []
 
-        for p in data.get("player", []):
-            players.append({
-                "id": make_id(p.get("idPlayer")),
-                "name": p.get("strPlayer"),
-                "team": p.get("strTeam"),
-                "position": p.get("strPosition")
-            })
+        if data and "player" in data:
+            for p in data["player"]:
+                players.append({
+                    "id": make_id(p.get("idPlayer")),
+                    "name": p.get("strPlayer"),
+                    "team": p.get("strTeam"),
+                    "position": p.get("strPosition"),
+                    "nationality": p.get("strNationality")
+                })
 
         push("players", players)
+        return players
 
+    # =========================
+    # المباريات (أوروبا كاملة)
+    # =========================
     def load_matches(self):
-        url = "https://raw.githubusercontent.com/openfootball/football.json/master/data/2023/en.1.json"
-        data = requests.get(url).json()
+        log("تحميل المباريات العالمية...")
+
+        leagues = ["en.1", "es.1", "de.1", "it.1", "fr.1"]
 
         matches = []
 
-        league_id = make_id("premier league", "england")
+        for lg in leagues:
+            url = f"https://raw.githubusercontent.com/openfootball/football.json/master/data/2023/{lg}.json"
+            data = safe_json(url)
 
-        for m in data.get("matches", []):
-            matches.append({
-                "id": make_id(m.get("date"), m.get("team1"), m.get("team2")),
-                "league_id": league_id,
-                "date": m.get("date"),
-                "home": m.get("team1"),
-                "away": m.get("team2"),
-                "score": f"{m.get('score1')}-{m.get('score2')}"
-            })
+            if not data:
+                continue
 
-            if len(matches) >= 800:
-                push("matches", matches)
-                matches = []
+            for m in data.get("matches", []):
+                matches.append({
+                    "id": make_id(m.get("date"), m.get("team1"), m.get("team2")),
+                    "league": lg,
+                    "date": m.get("date"),
+                    "home": m.get("team1"),
+                    "away": m.get("team2"),
+                    "score": f"{m.get('score1')}-{m.get('score2')}"
+                })
+
+                if len(matches) % 1000 == 0:
+                    log(f"تم تجهيز {len(matches)} مباراة")
 
         push("matches", matches)
+        return matches
 
-    def run(self):
-        print("🚀 STARTING FAST FOOTBALL DB")
+    # =========================
+    # الانتقالات
+    # =========================
+    def load_transfers(self):
+        log("تحميل الانتقالات العالمية...")
 
-        teams = self.load_leagues_teams()
-        self.load_players()
-        self.load_matches()
+        url = "https://raw.githubusercontent.com/detrin/Transfermarkt-Data/main/data/transfers.csv"
 
-        print("🏁 DONE")
+        try:
+            r = requests.get(url, timeout=40)
+            lines = r.text.split("\n")
 
+            transfers = []
+
+            for line in lines[1:20000]:  # حماية من الضغط
+                parts = line.split(",")
+
+                if len(parts) < 5:
+                    continue
+
+                transfers.append({
+                    "id": make_id(line),
+                    "player": parts[0],
+                    "from_team": parts[1],
+                    "to_team": parts[2],
+                    "fee": parts[3]
+                })
+
+            push("transfers", transfers)
+            return transfers
+
+        except Exception as e:
+            log(f"فشل الانتقالات: {str(e)[:80]}")
+            return []
+
+
+# =========================
+# 🚀 تشغيل يدوي فقط
+# =========================
 
 if __name__ == "__main__":
-    FootballDB().run()
+    GlobalFootballEngine().run()
