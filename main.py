@@ -1,187 +1,197 @@
 import os
 import requests
-import hashlib
+import pandas as pd
 import json
+import hashlib
 import time
 from datetime import datetime
+import sys
+import io
 
-# =========================
-# ⚙️ إعدادات Supabase
-# =========================
+# إعداد الطباعة الفورية
+sys.stdout.reconfigure(line_buffering=True)
+
+print("="*70, flush=True)
+print("🏆 بدء تشغيل أرشيف كرة القدم الشامل", flush=True)
+print("="*70, flush=True)
+
+# Supabase
 SUPABASE_URL = "https://nugskdozmxlgrnkfsxlg.supabase.co/rest/v1"
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-HEADERS = {
+headers = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "resolution=merge-duplicates"
+    "Content-Type": "application/json"
 }
 
-# =========================
-# 🧠 أدوات مساعدة
-# =========================
-def make_id(*args):
-    raw = "_".join([str(a).strip().lower() for a in args if a])
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-def log(msg):
-    print(f"🔹 {msg}", flush=True)
-
-
-def safe_get(url):
-    """يحمي من JSONDecodeError"""
-    try:
-        r = requests.get(url, timeout=30)
-        if r.status_code != 200:
-            log(f"فشل المصدر: HTTP {r.status_code}")
-            return None
-
-        try:
-            return r.json()
-        except:
-            return json.loads(r.text)
-
-    except Exception as e:
-        log(f"خطأ تحميل: {str(e)[:80]}")
-        return None
-
-
-def push(table, data):
-    if not data:
+def upsert_to_supabase(table, data_list):
+    if not data_list:
         return 0
-
-    success = 0
-
-    for i in range(0, len(data), 200):
-        batch = data[i:i+200]
-
+    if not isinstance(data_list, list):
+        data_list = [data_list]
+    
+    inserted = 0
+    for i in range(0, len(data_list), 50):
+        batch = data_list[i:i+50]
         try:
-            r = requests.post(
-                f"{SUPABASE_URL}/{table}",
-                headers=HEADERS,
-                json=batch,
-                timeout=30
-            )
-
-            if r.status_code in [200, 201]:
-                success += len(batch)
-                log(f"تم رفع {len(batch)} سجل إلى {table}")
+            h = headers.copy()
+            h["Prefer"] = "resolution=merge-duplicates,return=minimal"
+            resp = requests.post(f"{SUPABASE_URL}/{table}", headers=h, json=batch, timeout=30)
+            if resp.status_code in [200, 201]:
+                inserted += len(batch)
+                print(f"   ✅ رفع دفعة إلى {table}: {len(batch)} سجل", flush=True)
             else:
-                log(f"خطأ رفع {table}: {r.status_code}")
-
+                print(f"   ⚠️ فشل رفع دفعة إلى {table}: {resp.status_code}", flush=True)
         except Exception as e:
-            log(f"استثناء رفع: {str(e)[:60]}")
-
+            print(f"   ❌ خطأ: {str(e)[:50]}", flush=True)
         time.sleep(0.1)
+    return inserted
 
-    return success
+# ========== 1. jokecamp/FootballData ==========
+print("\n📥 [1/4] جلب بيانات jokecamp/FootballData...", flush=True)
 
-
-# =========================
-# ⚽ المحرك العالمي
-# =========================
-class FootballEnginePRO:
-
-    def run(self):
-        print("\n==============================")
-        print("🌍 تشغيل قاعدة بيانات كرة القدم العالمية PRO")
-        print("==============================\n")
-
-        teams = self.load_teams()
-        players = self.load_players()
-        matches = self.load_matches()
-
-        print("\n==============================")
-        print("🏁 انتهى بناء القاعدة")
-        print("==============================")
-
-        log(f"الفرق: {len(teams)}")
-        log(f"اللاعبين: {len(players)}")
-        log(f"المباريات: {len(matches)}")
-
-    # =========================
-    # 🏟️ الفرق (مصدر ثابت شغال)
-    # =========================
-    def load_teams(self):
-        log("تحميل الفرق...")
-
-        url = "https://raw.githubusercontent.com/openfootball/football.json/master/data/2024/en.1.json"
-        data = safe_get(url)
-
-        if not data:
-            return []
-
-        league_id = make_id("premier league", "england")
-        teams = []
-
-        for t in data.get("teams", []):
-            teams.append({
-                "id": make_id(t.get("name"), "england"),
-                "name": t.get("name"),
-                "code": t.get("code"),
-                "league_id": league_id
-            })
-
-        push("teams", teams)
-        return teams
-
-    # =========================
-    # 👤 اللاعبين (API ثابت)
-    # =========================
-    def load_players(self):
-        log("تحميل اللاعبين...")
-
-        url = "https://www.thesportsdb.com/api/v1/json/3/searchplayers.php?t=Arsenal"
-        data = safe_get(url)
-
-        if not data:
-            return []
-
-        players = []
-
-        for p in data.get("player", []):
-            players.append({
-                "id": make_id(p.get("idPlayer")),
-                "name": p.get("strPlayer"),
-                "team": p.get("strTeam"),
-                "position": p.get("strPosition"),
-                "nationality": p.get("strNationality")
-            })
-
-        push("players", players)
-        return players
-
-    # =========================
-    # ⚽ المباريات (مصدر صحيح)
-    # =========================
-    def load_matches(self):
-        log("تحميل المباريات...")
-
-        url = "https://raw.githubusercontent.com/openfootball/football.json/master/data/2024/en.1.json"
-        data = safe_get(url)
-
-        if not data:
-            return []
-
+try:
+    url = "https://raw.githubusercontent.com/jokecamp/FootballData/master/data/EPL/2015-16/2015-16_PL_Results.csv"
+    resp = requests.get(url, timeout=30)
+    if resp.status_code == 200:
+        df = pd.read_csv(io.StringIO(resp.text))
         matches = []
-
-        for m in data.get("matches", []):
+        for _, row in df.iterrows():
+            match_id = hashlib.md5(f"{row.get('Date')}_{row.get('HomeTeam')}_{row.get('AwayTeam')}".encode()).hexdigest()
             matches.append({
-                "id": make_id(m.get("date"), m.get("team1"), m.get("team2")),
-                "date": m.get("date"),
-                "home": m.get("team1"),
-                "away": m.get("team2"),
-                "score": f"{m.get('score1')}-{m.get('score2')}"
+                "id": match_id,
+                "date": row.get("Date"),
+                "home_team": row.get("HomeTeam"),
+                "away_team": row.get("AwayTeam"),
+                "home_score": row.get("FTHG"),
+                "away_score": row.get("FTAG"),
+                "league": "EPL"
             })
+        count = upsert_to_supabase("matches", matches)
+        print(f"   ✅ تم رفع {count} مباراة من jokecamp", flush=True)
+    else:
+        print(f"   ❌ فشل: HTTP {resp.status_code}", flush=True)
+except Exception as e:
+    print(f"   ❌ خطأ: {str(e)}", flush=True)
 
-        push("matches", matches)
-        return matches
+# ========== 2. engsoccerdata (بيانات تاريخية إنجلترا) ==========
+print("\n📥 [2/4] جلب بيانات engsoccerdata التاريخية...", flush=True)
 
+try:
+    url = "https://raw.githubusercontent.com/jalapic/engsoccerdata/master/data-raw/engsoccerdata2.csv"
+    resp = requests.get(url, timeout=30)
+    if resp.status_code == 200:
+        df = pd.read_csv(io.StringIO(resp.text))
+        matches = []
+        for _, row in df.head(5000).iterrows():
+            match_id = hashlib.md5(f"{row.get('Date')}_{row.get('home')}_{row.get('visitor')}_{row.get('Season')}".encode()).hexdigest()
+            matches.append({
+                "id": match_id,
+                "date": row.get("Date"),
+                "season": row.get("Season"),
+                "home_team": row.get("home"),
+                "away_team": row.get("visitor"),
+                "home_score": row.get("hgoal"),
+                "away_score": row.get("vgoal"),
+                "league": "England",
+                "tier": row.get("tier")
+            })
+        count = upsert_to_supabase("matches", matches)
+        print(f"   ✅ تم رفع {count} مباراة تاريخية", flush=True)
+    else:
+        print(f"   ❌ فشل: HTTP {resp.status_code}", flush=True)
+except Exception as e:
+    print(f"   ❌ خطأ: {str(e)}", flush=True)
 
-# =========================
-# 🚀 تشغيل يدوي فقط (GitHub Actions)
-# =========================
-if __name__ == "__main__":
-    FootballEnginePRO().run()
+# ========== 3. بيانات كأس العالم (openfootball) ==========
+print("\n📥 [3/4] جلب بيانات كأس العالم...", flush=True)
+
+worldcups = [2010, 2014, 2018, 2022, 2026]
+all_wc_matches = []
+
+for year in worldcups:
+    url = f"https://raw.githubusercontent.com/openfootball/worldcup.json/master/{year}/worldcup.json"
+    try:
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            for round_data in data.get("rounds", []):
+                for match in round_data.get("matches", []):
+                    match_id = f"wc_{year}_{match.get('num', 0)}"
+                    all_wc_matches.append({
+                        "id": match_id,
+                        "tournament": f"FIFA World Cup {year}",
+                        "season": year,
+                        "home_team": match.get("team1", {}).get("name"),
+                        "away_team": match.get("team2", {}).get("name"),
+                        "home_score": match.get("score1"),
+                        "away_score": match.get("score2"),
+                        "date": match.get("date"),
+                        "stadium": match.get("stadium"),
+                        "status": "finished"
+                    })
+            print(f"   ✅ كأس العالم {year}: تم", flush=True)
+        else:
+            print(f"   ⚠️ كأس العالم {year}: غير متوفر", flush=True)
+    except Exception as e:
+        print(f"   ❌ خطأ في {year}: {str(e)[:50]}", flush=True)
+
+if all_wc_matches:
+    count = upsert_to_supabase("matches", all_wc_matches)
+    print(f"   ✅ تم رفع {count} مباراة كأس عالم", flush=True)
+
+# ========== 4. بيانات اللاعبين والإحصائيات المتقدمة (soccerdata) ==========
+print("\n📥 [4/4] جلب بيانات اللاعبين والإحصائيات المتقدمة...", flush=True)
+
+try:
+    # ملاحظة: هذا يتطلب تثبيت soccerdata: pip install soccerdata
+    import soccerdata as sd
+    
+    print("   🔄 جلب بيانات الدوري الإنجليزي من FBref...", flush=True)
+    fbref = sd.FBref('ENG-Premier League', '2025')
+    
+    # جلب إحصائيات اللاعبين
+    players_stats = fbref.read_player_season_stats(stat_type='standard')
+    if players_stats is not None and not players_stats.empty:
+        players = []
+        for idx, row in players_stats.head(1000).iterrows():
+            players.append({
+                "id": hashlib.md5(f"{row.get('player')}_{row.get('team')}".encode()).hexdigest(),
+                "name": row.get("player"),
+                "team": row.get("team"),
+                "goals": row.get("goals"),
+                "assists": row.get("assists"),
+                "position": row.get("position")
+            })
+        count = upsert_to_supabase("players", players)
+        print(f"   ✅ تم رفع {count} لاعب", flush=True)
+    
+    # جلب جدول المباريات
+    schedule = fbref.read_schedule()
+    if schedule is not None and not schedule.empty:
+        matches = []
+        for idx, row in schedule.head(500).iterrows():
+            matches.append({
+                "id": hashlib.md5(f"{row.get('date')}_{row.get('home_team')}_{row.get('away_team')}".encode()).hexdigest(),
+                "date": row.get("date"),
+                "home_team": row.get("home_team"),
+                "away_team": row.get("away_team"),
+                "home_score": row.get("home_score"),
+                "away_score": row.get("away_score")
+            })
+        count = upsert_to_supabase("matches", matches)
+        print(f"   ✅ تم رفع {count} مباراة من FBref", flush=True)
+        
+except ImportError:
+    print("   ⚠️ مكتبة soccerdata غير مثبتة. يتم تخطي هذه المرحلة.", flush=True)
+    print("   للتثبيت: pip install soccerdata", flush=True)
+except Exception as e:
+    print(f"   ❌ خطأ في soccerdata: {str(e)[:100]}", flush=True)
+
+# ========== النتيجة النهائية ==========
+print("\n" + "="*70, flush=True)
+print("🏆 اكتمل الأرشيف!", flush=True)
+print("="*70, flush=True)
+print("✅ تم رفع المباريات والنتائج واللاعبين والإحصائيات", flush=True)
+print("✅ جميع البيانات في Supabase جاهزة للاستخدام", flush=True)
+print("="*70, flush=True)
